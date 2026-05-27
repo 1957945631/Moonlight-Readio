@@ -1,5 +1,4 @@
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "moonlight-radio",
   "main": "worker/index.js",
   "compatibility_date": "2026-05-27",

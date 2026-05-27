@@ -166,15 +166,17 @@ npm test
 
 ## Cloudflare 部署
 
-项目已提供 Cloudflare Workers 配置，公开部署使用 Worker 代理 `/api/*`，静态资源由 `web/` 目录提供。
+项目已提供 Cloudflare Workers 配置，公开部署使用 Worker 代理 `/api/*`，静态资源由 `web/` 目录提供。推荐直接在 Cloudflare 控制台连接 GitHub 仓库部署，不需要在本地配置 Cloudflare API token。
 
-```powershell
-npm install
-npm run cf:check
-npm run cf:deploy
-```
+部署路径：
 
-`wrangler.jsonc` 中只放非敏感配置：
+1. 把当前仓库推送到 GitHub。
+2. 在 Cloudflare 控制台进入 Workers & Pages。
+3. 选择通过 Git 仓库创建/导入项目，并授权访问这个 GitHub 仓库。
+4. 项目类型选择 Worker，入口文件使用 `worker/index.js`，静态资源目录使用 `web/`。
+5. 环境变量按下面的非敏感配置填写；密钥只在 Cloudflare 控制台的 Secrets 里填写。
+
+Cloudflare 配置中只放非敏感变量：
 
 ```env
 AI_PROVIDER=mock
@@ -184,20 +186,13 @@ NETEASE_REAL_IP=116.25.146.177
 NETEASE_AUDIO_LEVEL=standard
 ```
 
-如果要在 Cloudflare 上启用真实 AI，把 `AI_PROVIDER` 改成 `openai`，并用 Cloudflare secret 配置 `OPENAI_API_KEY`，不要写进 Git：
-
-```powershell
-npx wrangler secret put OPENAI_API_KEY
-```
-
-非交互部署环境需要在本机或 CI 中设置 `CLOUDFLARE_API_TOKEN`。这个 token 不能提交到仓库。
+如果要在 Cloudflare 上启用真实 AI，把 `AI_PROVIDER` 改成 `openai`，并在 Cloudflare 控制台的 Secrets 里添加 `OPENAI_API_KEY`。不要把 OpenAI key、Cloudflare token 或网易云 Cookie 写进 GitHub。
 
 ## GitHub 推送前检查
 
 ```powershell
 git status --short
 npm test
-npm run cf:check
 ```
 
 确认 `.env`、`node_modules/`、`logs/`、`server*.log`、`tools/_downloads/` 和任何 API token 没有进入提交。

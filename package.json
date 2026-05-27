@@ -4,9 +4,6 @@
   "private": true,
   "description": "Moonlight private AI radio prototype with provider adapters.",
   "scripts": {
-    "cf:check": "npx wrangler deploy --dry-run",
-    "cf:deploy": "npx wrangler deploy",
-    "cf:dev": "npx wrangler dev --port 8787",
     "ncm": "ncm-cli",
     "ncm:config": "ncm-cli configure",
     "ncm:login": "ncm-cli login",
@@ -19,8 +16,5 @@
   },
   "engines": {
     "node": ">=20"
-  },
-  "devDependencies": {
-    "wrangler": "^4.95.0"
   }
 }
