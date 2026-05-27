@@ -2,6 +2,7 @@
 node_modules/
 logs/
 tools/_downloads/
+tools/mpv/mpv.exe
 server.out.log
 server.err.log
 npm-debug.log*
