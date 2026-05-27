@@ -90,6 +90,16 @@
       if (status.playback) playbackStatus.textContent = status.playback;
     }
 
+    function describeNeteaseStatus(music) {
+      if (!music || !music.configured) return "网易云 API 未配置";
+      if (music.reachable === false) return "网易云 API 不可达";
+      if (!music.supportsSearch) return "网易云搜索不可用";
+      if (!music.loggedIn && !music.supportsPlaybackUrl) return "搜索可用，未登录/播放受限";
+      if (!music.supportsPlaybackUrl) return "搜索可用，播放受限";
+      if (!music.loggedIn) return "API 可用，未登录";
+      return "网易云 API 已就绪";
+    }
+
     function syncPlaybackSource(sourceOverride) {
       const localSource = getPlaybackSource(tracks[radioState.current]);
       const source = sourceOverride || localSource;
@@ -408,7 +418,7 @@
           else if (!status.music.supportsSearch) musicText = "网易云 CLI 无搜索命令";
           else musicText = "网易云 CLI 已就绪";
         } else if (status.music.provider === "netease") {
-          musicText = status.music.authorized ? "网易云已授权" : "网易云待授权";
+          musicText = describeNeteaseStatus(status.music);
         }
         setIntegrationStatus({
           ai: status.ai.provider === "openai" && status.ai.configured ? "AI 已连接" : "AI 模拟中",

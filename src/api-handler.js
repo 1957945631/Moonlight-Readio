@@ -65,9 +65,11 @@ async function handleApiRequest(request, services) {
           provider: musicProvider.name,
           authorized: Boolean(musicProvider.authorized),
           configured: musicStatus.configured,
+          reachable: musicStatus.reachable,
           loggedIn: musicStatus.loggedIn,
           playerReady: musicStatus.playerReady,
           supportsSearch: musicStatus.supportsSearch,
+          supportsPlaybackUrl: musicStatus.supportsPlaybackUrl,
           message: musicStatus.message,
         },
       });

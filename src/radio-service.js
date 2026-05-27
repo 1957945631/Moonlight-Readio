@@ -63,8 +63,8 @@ function findChannel(value) {
 }
 
 function platformText(provider) {
+  if (provider.name === "netease") return provider.authorized ? "网易云 API 已配置" : "网易云 API 未配置";
   if (provider.name === "netease-cli") return "网易云 CLI 已接入";
-  if (provider.name === "netease") return provider.authorized ? "网易云已授权" : "网易云未授权，仅可外部打开";
   return "本地授权曲库";
 }
 

@@ -269,6 +269,26 @@ test("openai provider can use a custom chat-compatible reverse proxy", async () 
   assert.equal(plan.djText, "真实反代 DJ 文案");
 });
 
+test("openai provider includes upstream error body when falling back", async () => {
+  const ai = createAiProvider({
+    provider: "openai",
+    apiKey: "test-key",
+    baseUrl: "http://16.176.195.43:3000",
+    apiStyle: "chat",
+    fetch: async () => ({
+      ok: false,
+      status: 403,
+      text: async () => JSON.stringify({ error: { message: "channel forbidden" } }),
+    }),
+  });
+
+  const plan = await ai.plan({ text: "test", currentTrack: {}, context: {} });
+
+  assert.equal(plan.status, "fallback");
+  assert.match(plan.error, /403/);
+  assert.match(plan.error, /channel forbidden/);
+});
+
 test("openai provider accepts fenced json returned by chat-compatible models", async () => {
   const ai = createAiProvider({
     provider: "openai",
@@ -499,6 +519,32 @@ test("netease provider preserves local fallback playback links for non-ncm track
     url: "https://music.163.com/#/search/m/?s=Fallback%20Song",
     reason: "当前只有外部平台链接，不能在站内直接播放",
   });
+});
+
+test("netease provider reports API reachability, login, search, and playback status", async () => {
+  const provider = createMusicProvider({
+    provider: "netease",
+    apiBase: "https://api.example.test",
+    realIP: "116.25.146.177",
+    fetch: async (url) => ({
+      ok: true,
+      json: async () => {
+        if (url.includes("/login/status")) return { data: { account: null, profile: null } };
+        if (url.includes("/search")) return { result: { songs: [{ id: 212412, name: "Moon" }] } };
+        return { data: [{ id: 212412, url: null, code: 404 }] };
+      },
+    }),
+  });
+
+  const status = await provider.checkStatus();
+
+  assert.equal(status.configured, true);
+  assert.equal(status.reachable, true);
+  assert.equal(status.loggedIn, false);
+  assert.equal(status.supportsSearch, true);
+  assert.equal(status.supportsPlaybackUrl, false);
+  assert.equal(status.playerReady, false);
+  assert.match(status.message, /search works/);
 });
 
 test("radio service combines ai plan with music provider status", async () => {

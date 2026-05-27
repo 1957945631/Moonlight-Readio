@@ -161,9 +161,68 @@ function createNeteaseProvider(config = {}) {
     return `${pathname}?${search.toString()}`;
   }
 
+  async function probe(pathname) {
+    try {
+      return { ok: true, data: await officialRequest(pathname), error: "" };
+    } catch (error) {
+      return { ok: false, data: null, error: error.message || String(error) };
+    }
+  }
+
+  function isLoggedIn(payload) {
+    if (!payload) return false;
+    const data = payload.data && typeof payload.data === "object" ? payload.data : payload;
+    return Boolean(data.account || data.profile || (data.data && (data.data.account || data.data.profile)));
+  }
+
   return {
     name: "netease",
     authorized: authorized || Boolean(apiBase),
+    async checkStatus() {
+      if (!apiBase) {
+        return {
+          configured: false,
+          reachable: false,
+          loggedIn: false,
+          supportsSearch: false,
+          supportsPlaybackUrl: false,
+          message: "NETEASE_API_BASE is not configured.",
+        };
+      }
+
+      const [login, search, playback] = await Promise.all([
+        probe("/login/status"),
+        probe("/search?keywords=%E6%9C%88%E4%BA%AE&type=1&limit=1"),
+        probe(playbackUrl("/song/url/v1", {
+          id: "212412",
+          level: audioLevel,
+          realIP,
+        })),
+      ]);
+      const songs = extractSearchSongs(search.data);
+      const playbackItem = extractPlaybackItem(playback.data);
+      const reachable = login.ok || search.ok || playback.ok;
+      const supportsSearch = Array.isArray(songs) && songs.length > 0;
+      const supportsPlaybackUrl = Boolean(playbackItem && playbackItem.url);
+      const errors = [login, search, playback].filter((item) => !item.ok).map((item) => item.error).filter(Boolean);
+      const message = !reachable
+        ? `NetEase API unreachable${errors.length ? `: ${errors[0]}` : ""}`
+        : supportsPlaybackUrl
+          ? "NetEase API reachable; playback URL available."
+          : supportsSearch
+            ? "NetEase API reachable; search works, playback URL may be restricted."
+            : "NetEase API reachable, but search did not return tracks.";
+
+      return {
+        configured: true,
+        reachable,
+        loggedIn: isLoggedIn(login.data),
+        supportsSearch,
+        supportsPlaybackUrl,
+        playerReady: supportsPlaybackUrl,
+        message,
+      };
+    },
     async searchTracks(query, mood) {
       const keyword = query || mood || "月亮";
       const official = await officialRequest(`/search?keywords=${encodeURIComponent(keyword)}&type=1&limit=8`).catch(() => null);

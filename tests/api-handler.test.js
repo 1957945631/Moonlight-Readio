@@ -17,6 +17,15 @@ test("api handler reports status using env-backed providers", async () => {
     AI_PROVIDER: "mock",
     MUSIC_PROVIDER: "netease",
     NETEASE_API_BASE: "https://api.example.test",
+  }, {
+    musicFetch: async (url) => ({
+      ok: true,
+      json: async () => {
+        if (url.includes("/login/status")) return { data: { account: null, profile: null } };
+        if (url.includes("/search")) return { result: { songs: [{ id: 212412, name: "Moon" }] } };
+        return { data: [{ id: 212412, url: null, code: 404 }] };
+      },
+    }),
   });
 
   const response = await handleApiRequest(new Request("https://moonlight.test/api/status"), services);
@@ -26,6 +35,11 @@ test("api handler reports status using env-backed providers", async () => {
   assert.equal(body.ai.provider, "mock");
   assert.equal(body.music.provider, "netease");
   assert.equal(body.music.authorized, true);
+  assert.equal(body.music.configured, true);
+  assert.equal(body.music.reachable, true);
+  assert.equal(body.music.loggedIn, false);
+  assert.equal(body.music.supportsSearch, true);
+  assert.equal(body.music.supportsPlaybackUrl, false);
 });
 
 test("api handler returns null for non-api routes", async () => {

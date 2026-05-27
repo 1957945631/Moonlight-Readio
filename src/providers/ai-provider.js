@@ -181,7 +181,11 @@ function createOpenAiProvider(config) {
           },
           body: JSON.stringify(payload),
         });
-        if (!response.ok) throw new Error(`OpenAI request failed: ${response.status}`);
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "");
+          const details = errorText ? ` ${errorText.slice(0, 300)}` : "";
+          throw new Error(`OpenAI request failed: ${response.status}${details}`);
+        }
         const data = await response.json();
         const parsed = parseJsonOutput(extractOutputText(data));
         return normalizePlan(parsed, input.text, "openai", "ready");
