@@ -1,5 +1,9 @@
 const DEFAULT_MODEL = "gpt-4.1-mini";
 
+function getRuntimeEnv(config = {}) {
+  return config.env || (typeof process !== "undefined" && process.env ? process.env : {});
+}
+
 function normalizePlan(raw, fallbackText, provider, status) {
   const searchQueries = Array.isArray(raw.searchQueries)
     ? raw.searchQueries
@@ -87,9 +91,10 @@ function parseJsonOutput(text) {
 }
 
 function createOpenAiProvider(config) {
-  const apiKey = config.apiKey || process.env.OPENAI_API_KEY;
-  const baseUrl = (config.baseUrl || process.env.OPENAI_BASE_URL || "https://api.openai.com").replace(/\/+$/, "");
-  const apiStyle = config.apiStyle || process.env.OPENAI_API_STYLE || "responses";
+  const env = getRuntimeEnv(config);
+  const apiKey = config.apiKey || env.OPENAI_API_KEY;
+  const baseUrl = (config.baseUrl || env.OPENAI_BASE_URL || "https://api.openai.com").replace(/\/+$/, "");
+  const apiStyle = config.apiStyle || env.OPENAI_API_STYLE || "responses";
   const requestFetch = config.fetch || fetch;
   if (!apiKey) {
     return {
@@ -103,7 +108,7 @@ function createOpenAiProvider(config) {
   return {
     name: "openai",
     async plan(input) {
-      const model = config.model || process.env.OPENAI_MODEL || DEFAULT_MODEL;
+      const model = config.model || env.OPENAI_MODEL || DEFAULT_MODEL;
       const systemPrompt = [
         "你是 Moonlight 私人音乐电台女 DJ，像熟悉的老朋友一样和用户说话。",
         "你不是机械歌单生成器。先判断用户意图：普通聊天、解释当前歌、补充状态、换歌单、点歌、避开某类音乐。",
@@ -120,7 +125,7 @@ function createOpenAiProvider(config) {
         context: input.context,
       });
       const responsesPayload = {
-        model: config.model || process.env.OPENAI_MODEL || DEFAULT_MODEL,
+        model: config.model || env.OPENAI_MODEL || DEFAULT_MODEL,
         input: [
           {
             role: "system",
@@ -189,7 +194,8 @@ function createOpenAiProvider(config) {
 }
 
 function createAiProvider(config = {}) {
-  const provider = config.provider || process.env.AI_PROVIDER || "mock";
+  const env = getRuntimeEnv(config);
+  const provider = config.provider || env.AI_PROVIDER || "mock";
   if (provider === "openai") return createOpenAiProvider(config);
   if (provider === "domestic") {
     return {

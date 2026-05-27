@@ -4,17 +4,23 @@
   "private": true,
   "description": "Moonlight private AI radio prototype with provider adapters.",
   "scripts": {
+    "cf:check": "npx wrangler deploy --dry-run",
+    "cf:deploy": "npx wrangler deploy",
+    "cf:dev": "npx wrangler dev --port 8787",
     "ncm": "ncm-cli",
     "ncm:config": "ncm-cli configure",
     "ncm:login": "ncm-cli login",
     "ncm:tui": "ncm-cli tui",
     "start": "node server.js",
-    "test": "node tests/moonlight-core.test.js && node tests/provider-contract.test.js && node tests/static-structure.test.js"
+    "test": "node tests/moonlight-core.test.js && node tests/provider-contract.test.js && node tests/api-handler.test.js && node tests/static-structure.test.js"
   },
   "dependencies": {
     "@music163/ncm-cli": "^0.1.5"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "wrangler": "^4.95.0"
   }
 }

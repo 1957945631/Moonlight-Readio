@@ -334,6 +334,173 @@ test("music provider exposes unavailable, external, and stream playback modes", 
   });
 });
 
+test("netease provider normalizes Vercel API search results", async () => {
+  const requests = [];
+  const provider = createMusicProvider({
+    provider: "netease",
+    apiBase: "https://api.example.test",
+    fetch: async (url) => {
+      requests.push(url);
+      return {
+        ok: true,
+        json: async () => ({
+          result: {
+            songs: [{
+              id: 36392029,
+              name: "日落大道",
+              duration: 275434,
+              artists: [{ name: "梁博" }],
+              album: {
+                name: "迷藏",
+                picUrl: "https://image.example/cover.jpg",
+              },
+            }],
+          },
+        }),
+      };
+    },
+  });
+
+  const tracks = await provider.searchTracks("梁博 日落大道");
+
+  assert.equal(requests[0], "https://api.example.test/search?keywords=%E6%A2%81%E5%8D%9A%20%E6%97%A5%E8%90%BD%E5%A4%A7%E9%81%93&type=1&limit=8");
+  assert.deepEqual(tracks, [{
+    id: "ncm:36392029",
+    title: "日落大道",
+    artist: "梁博",
+    duration: "4:35",
+    mood: "网易云音乐",
+    audioUrl: "",
+    externalUrl: "https://music.163.com/#/song?id=36392029",
+    sourceLabel: "网易云推荐",
+    originalId: "36392029",
+    encryptedId: "",
+    album: "迷藏",
+    coverUrl: "https://image.example/cover.jpg",
+  }]);
+});
+
+test("netease provider returns stream when Vercel API exposes a playable URL", async () => {
+  const requests = [];
+  const provider = createMusicProvider({
+    provider: "netease",
+    apiBase: "https://api.example.test/",
+    realIP: "116.25.146.177",
+    fetch: async (url) => {
+      requests.push(url);
+      return {
+        ok: true,
+        json: async () => ({
+          code: 200,
+          data: [{
+            id: 36392029,
+            url: "https://m701.music.126.net/song.mp3",
+            br: 128000,
+            type: "mp3",
+          }],
+        }),
+      };
+    },
+  });
+
+  assert.deepEqual(await provider.getPlaybackSource("ncm:36392029"), {
+    mode: "stream",
+    url: "https://m701.music.126.net/song.mp3",
+    reason: "网易云 API 返回可播放音频地址",
+    originalId: "36392029",
+    bitrate: 128000,
+    type: "mp3",
+  });
+  assert.deepEqual(requests, [
+    "https://api.example.test/song/url/v1?id=36392029&level=standard&realIP=116.25.146.177",
+  ]);
+});
+
+test("netease provider falls back to external link when Vercel API returns null playback URL", async () => {
+  const requests = [];
+  const provider = createMusicProvider({
+    provider: "netease",
+    apiBase: "https://api.example.test",
+    realIP: "116.25.146.177",
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        code: 200,
+        data: [{ id: 212412, url: null, code: 404 }],
+      }),
+    }),
+  });
+
+  assert.deepEqual(await provider.getPlaybackSource("ncm:212412"), {
+    mode: "external",
+    url: "https://music.163.com/#/song?id=212412",
+    reason: "网易云 API 未返回可播放地址，已降级为平台外链",
+    originalId: "212412",
+  });
+});
+
+test("netease provider uses match endpoint when v1 playback URL is empty", async () => {
+  const requests = [];
+  const provider = createMusicProvider({
+    provider: "netease",
+    apiBase: "https://api.example.test",
+    realIP: "116.25.146.177",
+    fetch: async (url) => {
+      requests.push(url);
+      return {
+        ok: true,
+        json: async () => {
+          if (url.includes("/song/url/v1")) return { data: [{ id: 212412, url: null, code: 404 }] };
+          return {
+            code: 200,
+            data: "https://m801.music.126.net/unblocked.flac",
+            proxyUrl: "",
+          };
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(await provider.getPlaybackSource("ncm:212412"), {
+    mode: "stream",
+    url: "https://m801.music.126.net/unblocked.flac",
+    reason: "网易云 API 解灰接口返回可播放音频地址",
+    originalId: "212412",
+  });
+  assert.deepEqual(requests, [
+    "https://api.example.test/song/url/v1?id=212412&level=standard&realIP=116.25.146.177",
+    "https://api.example.test/song/url/match?id=212412&level=standard&randomCNIP=true",
+  ]);
+});
+
+test("netease provider preserves local fallback playback links for non-ncm tracks", async () => {
+  const provider = createMusicProvider({
+    provider: "netease",
+    apiBase: "https://api.example.test",
+    tracks: [
+      {
+        id: "local-fallback",
+        title: "Fallback Song",
+        artist: "Fallback Artist",
+        externalUrl: "https://music.163.com/#/search/m/?s=Fallback%20Song",
+      },
+    ],
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({ result: { songs: [] } }),
+    }),
+  });
+
+  const tracks = await provider.searchTracks("missing");
+
+  assert.equal(tracks[0].id, "local-fallback");
+  assert.deepEqual(await provider.getPlaybackSource(tracks[0].id), {
+    mode: "external",
+    url: "https://music.163.com/#/search/m/?s=Fallback%20Song",
+    reason: "当前只有外部平台链接，不能在站内直接播放",
+  });
+});
+
 test("radio service combines ai plan with music provider status", async () => {
   const radio = createRadioService({
     aiProvider: createAiProvider({ provider: "mock" }),

@@ -164,11 +164,40 @@ npm test
 - 普通聊天不能换队列、重播、重置进度或停止音乐。
 - 后端是 AI key、音乐平台凭证和播放控制的唯一边界。
 
+## Cloudflare 部署
+
+项目已提供 Cloudflare Workers 配置，公开部署使用 Worker 代理 `/api/*`，静态资源由 `web/` 目录提供。
+
+```powershell
+npm install
+npm run cf:check
+npm run cf:deploy
+```
+
+`wrangler.jsonc` 中只放非敏感配置：
+
+```env
+AI_PROVIDER=mock
+MUSIC_PROVIDER=netease
+NETEASE_API_BASE=https://api-enhanced-umber-ten.vercel.app
+NETEASE_REAL_IP=116.25.146.177
+NETEASE_AUDIO_LEVEL=standard
+```
+
+如果要在 Cloudflare 上启用真实 AI，把 `AI_PROVIDER` 改成 `openai`，并用 Cloudflare secret 配置 `OPENAI_API_KEY`，不要写进 Git：
+
+```powershell
+npx wrangler secret put OPENAI_API_KEY
+```
+
+非交互部署环境需要在本机或 CI 中设置 `CLOUDFLARE_API_TOKEN`。这个 token 不能提交到仓库。
+
 ## GitHub 推送前检查
 
 ```powershell
 git status --short
 npm test
+npm run cf:check
 ```
 
-确认 `.env`、`node_modules/`、`logs/`、`server*.log` 和 `tools/_downloads/` 没有进入提交。
+确认 `.env`、`node_modules/`、`logs/`、`server*.log`、`tools/_downloads/` 和任何 API token 没有进入提交。

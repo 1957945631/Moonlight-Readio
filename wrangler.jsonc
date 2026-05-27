@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "moonlight-radio",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-05-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./web",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "AI_PROVIDER": "mock",
+    "MUSIC_PROVIDER": "netease",
+    "NETEASE_API_BASE": "https://api-enhanced-umber-ten.vercel.app",
+    "NETEASE_REAL_IP": "116.25.146.177",
+    "NETEASE_AUDIO_LEVEL": "standard"
+  }
+}

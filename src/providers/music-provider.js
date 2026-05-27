@@ -3,6 +3,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { TRACKS } = require("../moonlight-core.js");
 
+function getRuntimeEnv(config = {}) {
+  return config.env || (typeof process !== "undefined" && process.env ? process.env : {});
+}
+
 function stripAnsi(value) {
   return String(value || "").replace(/\x1b\[[0-9;]*m/g, "");
 }
@@ -67,14 +71,19 @@ function createLocalProvider(config = {}) {
 }
 
 function createNeteaseProvider(config = {}) {
+  const env = getRuntimeEnv(config);
   const local = createLocalProvider({ tracks: config.tracks || TRACKS, generateExternalUrl: true });
-  const authorized = Boolean(config.authorized || process.env.NETEASE_AUTHORIZED === "true");
-  const apiBase = config.apiBase || process.env.NETEASE_API_BASE || "";
-  const apiKey = config.apiKey || process.env.NETEASE_API_KEY || "";
+  const authorized = Boolean(config.authorized || env.NETEASE_AUTHORIZED === "true");
+  const apiBase = (config.apiBase || env.NETEASE_API_BASE || "").replace(/\/+$/, "");
+  const apiKey = config.apiKey || env.NETEASE_API_KEY || "";
+  const realIP = config.realIP || env.NETEASE_REAL_IP || "116.25.146.177";
+  const audioLevel = config.audioLevel || env.NETEASE_AUDIO_LEVEL || "standard";
+  const requestFetch = config.fetch || fetch;
+  const trackCache = new Map();
 
   async function officialRequest(pathname, init) {
-    if (!authorized || !apiBase) return null;
-    const response = await fetch(`${apiBase}${pathname}`, {
+    if (!apiBase) return null;
+    const response = await requestFetch(`${apiBase}${pathname}`, {
       ...init,
       headers: {
         "Content-Type": "application/json",
@@ -86,33 +95,135 @@ function createNeteaseProvider(config = {}) {
     return response.json();
   }
 
+  function normalizeNeteaseApiTrack(track, index) {
+    const originalId = String(track.id || track.songId || track.originalId || "").replace(/^ncm:/, "");
+    const artists = Array.isArray(track.artists)
+      ? track.artists.map((artist) => artist.name).filter(Boolean).join(" / ")
+      : Array.isArray(track.ar)
+        ? track.ar.map((artist) => artist.name).filter(Boolean).join(" / ")
+        : track.artist || track.singer || "";
+    const album = track.album || track.al || {};
+    const durationMs = Number(track.duration || track.dt || 0);
+    const duration = durationMs > 0
+      ? `${Math.floor(durationMs / 60000)}:${String(Math.floor((durationMs % 60000) / 1000)).padStart(2, "0")}`
+      : track.durationText || "--";
+    const normalized = normalizeTrack({
+      id: originalId ? `ncm:${originalId}` : `ncm-api-${index + 1}`,
+      title: track.name || track.title || `NetEase Track ${index + 1}`,
+      artist: artists || "NetEase Cloud Music",
+      duration,
+      mood: track.mood || "网易云音乐",
+      externalUrl: originalId ? `https://music.163.com/#/song?id=${originalId}` : "",
+      sourceLabel: "网易云推荐",
+      originalId,
+      encryptedId: track.encryptedId || track.encrypted_id || "",
+      album: album.name || track.albumName || "",
+      coverUrl: album.picUrl || album.picUrl_str || album.coverImgUrl || track.coverUrl || "",
+    }, index, { generateExternalUrl: true });
+    return {
+      ...normalized,
+      album: album.name || track.albumName || "",
+      coverUrl: album.picUrl || album.picUrl_str || album.coverImgUrl || track.coverUrl || "",
+    };
+  }
+
+  function extractSearchSongs(payload) {
+    return payload && (
+      payload.tracks
+      || payload.songs
+      || (payload.result && (payload.result.songs || payload.result.tracks))
+      || (payload.data && (payload.data.songs || payload.data.tracks))
+    );
+  }
+
+  function normalizeNeteaseId(id) {
+    return String(id || "").replace(/^ncm:/, "");
+  }
+
+  function isNeteaseTrackId(id) {
+    const value = String(id || "");
+    return value.startsWith("ncm:") || /^\d+$/.test(value);
+  }
+
+  function extractPlaybackItem(payload) {
+    const data = payload && payload.data;
+    if (typeof data === "string") return { url: data };
+    if (Array.isArray(data)) return data[0] || null;
+    if (data && typeof data === "object") return data;
+    return payload && payload.url ? payload : null;
+  }
+
+  function playbackUrl(pathname, params) {
+    const search = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") search.set(key, String(value));
+    });
+    return `${pathname}?${search.toString()}`;
+  }
+
   return {
     name: "netease",
-    authorized,
+    authorized: authorized || Boolean(apiBase),
     async searchTracks(query, mood) {
-      const official = await officialRequest(`/search?q=${encodeURIComponent(query || mood || "")}`).catch(() => null);
-      if (official && Array.isArray(official.tracks)) {
-        return official.tracks.map((track, index) => normalizeTrack({ ...track, sourceLabel: "网易云推荐" }, index, {
-          generateExternalUrl: true,
-        }));
+      const keyword = query || mood || "月亮";
+      const official = await officialRequest(`/search?keywords=${encodeURIComponent(keyword)}&type=1&limit=8`).catch(() => null);
+      const songs = extractSearchSongs(official);
+      if (Array.isArray(songs) && songs.length) {
+        const tracks = songs.map(normalizeNeteaseApiTrack);
+        tracks.forEach((track) => trackCache.set(track.id, track));
+        return tracks.slice(0, 8);
       }
-      const localTracks = await local.searchTracks(query || mood);
-      return localTracks.map((track) => ({ ...track, sourceLabel: authorized ? "网易云候选" : "网易云外链" }));
+      const localTracks = await local.searchTracks(keyword);
+      return localTracks.map((track) => ({ ...track, sourceLabel: apiBase ? "网易云 API 无匹配" : "网易云外链" }));
     },
     async getTrackDetail(id) {
-      const official = await officialRequest(`/tracks/${encodeURIComponent(id)}`).catch(() => null);
-      return official && official.track
-        ? normalizeTrack({ ...official.track, sourceLabel: "网易云推荐" }, 0, { generateExternalUrl: true })
-        : local.getTrackDetail(id);
+      const normalizedId = String(id || "");
+      if (trackCache.has(normalizedId)) return trackCache.get(normalizedId);
+      return local.getTrackDetail(id);
     },
     async getPlaybackSource(id) {
-      const official = await officialRequest(`/playback/${encodeURIComponent(id)}`).catch(() => null);
-      if (official && official.url) return { mode: "stream", url: official.url, reason: "网易云授权音频可直接播放" };
-      const external = await local.getExternalUrl(id);
+      if (!isNeteaseTrackId(id)) return local.getPlaybackSource(id);
+      const originalId = normalizeNeteaseId(id);
+      const official = originalId
+        ? await officialRequest(playbackUrl("/song/url/v1", {
+          id: originalId,
+          level: audioLevel,
+          realIP,
+        })).catch(() => null)
+        : null;
+      const playback = extractPlaybackItem(official);
+      if (playback && playback.url) {
+        return {
+          mode: "stream",
+          url: playback.url,
+          reason: "网易云 API 返回可播放音频地址",
+          originalId,
+          bitrate: playback.br,
+          type: playback.type,
+        };
+      }
+      const matched = originalId
+        ? await officialRequest(playbackUrl("/song/url/match", {
+          id: originalId,
+          level: audioLevel,
+          randomCNIP: true,
+        })).catch(() => null)
+        : null;
+      const matchedPlayback = extractPlaybackItem(matched);
+      if (matchedPlayback && matchedPlayback.url) {
+        return {
+          mode: "stream",
+          url: matchedPlayback.url,
+          reason: "网易云 API 解灰接口返回可播放音频地址",
+          originalId,
+        };
+      }
+      const external = originalId ? `https://music.163.com/#/song?id=${originalId}` : await local.getExternalUrl(id);
       return {
         mode: external ? "external" : "unavailable",
         url: external || "",
-        reason: authorized ? "当前授权未返回站内播放地址" : "未配置网易云官方播放授权，只提供外部打开",
+        reason: apiBase ? "网易云 API 未返回可播放地址，已降级为平台外链" : "未配置网易云 API，只提供外部打开",
+        ...(originalId ? { originalId } : {}),
       };
     },
     async getExternalUrl(id) {
@@ -130,7 +241,8 @@ function defaultCliScript() {
 
 function createCliRunner(config = {}) {
   if (config.runner) return config.runner;
-  const cliPath = config.cliPath || process.env.NETEASE_CLI_PATH || defaultCliScript();
+  const env = getRuntimeEnv(config);
+  const cliPath = config.cliPath || env.NETEASE_CLI_PATH || defaultCliScript();
   const scriptPath = cliPath.endsWith(".js") ? cliPath : defaultCliScript();
   const useNodeScript = fs.existsSync(scriptPath);
   const command = useNodeScript ? process.execPath : cliPath;
@@ -140,7 +252,7 @@ function createCliRunner(config = {}) {
     childProcess.execFile(command, [...prefixArgs, ...args], {
       cwd: process.cwd(),
       windowsHide: true,
-      timeout: Number(config.timeoutMs || process.env.NETEASE_CLI_TIMEOUT_MS || 20000),
+      timeout: Number(config.timeoutMs || env.NETEASE_CLI_TIMEOUT_MS || 20000),
       maxBuffer: 1024 * 1024,
     }, (error, stdout, stderr) => {
       resolve({
@@ -442,7 +554,8 @@ function createNeteaseCliProvider(config = {}) {
 }
 
 function createMusicProvider(config = {}) {
-  const provider = config.provider || process.env.MUSIC_PROVIDER || "local";
+  const env = getRuntimeEnv(config);
+  const provider = config.provider || env.MUSIC_PROVIDER || "local";
   if (provider === "netease-cli") return createNeteaseCliProvider(config);
   if (provider === "netease") return createNeteaseProvider(config);
   return createLocalProvider(config);
