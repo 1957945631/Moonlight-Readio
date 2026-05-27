@@ -129,16 +129,4 @@ Music Provider 应暴露：
 - 运行产物不要进入源码管理：`node_modules/`、`logs/`、`server*.log`、`tools/_downloads/`。
 - 改动用户可见行为时，优先补充 `tests/provider-contract.test.js` 或 `tests/moonlight-core.test.js`。
 - 完成前至少运行 `npm test`，并检查 `web/app.js` 能被解析。
-
-## 已完成的结构优化
-
-前端入口已拆成：
-
-```text
-web/
-+-- index.html
-+-- styles.css
-+-- app.js
-```
-
 后续产品行为修复应继续保持小范围修改，不要和进一步前端模块化混在一起。
