@@ -1,0 +1,20 @@
+{
+  "name": "moonlight-radio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Moonlight private AI radio prototype with provider adapters.",
+  "scripts": {
+    "ncm": "ncm-cli",
+    "ncm:config": "ncm-cli configure",
+    "ncm:login": "ncm-cli login",
+    "ncm:tui": "ncm-cli tui",
+    "start": "node server.js",
+    "test": "node tests/moonlight-core.test.js && node tests/provider-contract.test.js && node tests/static-structure.test.js"
+  },
+  "dependencies": {
+    "@music163/ncm-cli": "^0.1.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

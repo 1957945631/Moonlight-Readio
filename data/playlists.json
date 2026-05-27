@@ -1,0 +1,11 @@
+{
+  "station": "Moonlight",
+  "tracks": [
+    { "title": "Monday Night Exhale", "artist": "If · Bread", "mood": "低速呼吸" },
+    { "title": "Fade Into You", "artist": "Mazzy Star", "mood": "夜间慢放" },
+    { "title": "Open Eye Signal", "artist": "Jon Hopkins", "mood": "深度工作" },
+    { "title": "Moon Room", "artist": "Yerin Baek", "mood": "轻微失重" },
+    { "title": "On the Nature of Daylight", "artist": "Max Richter", "mood": "沉静整理" },
+    { "title": "分分钟需要你", "artist": "林忆莲", "mood": "温柔中文" }
+  ]
+}

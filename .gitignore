@@ -1,0 +1,7 @@
+.env
+node_modules/
+logs/
+tools/_downloads/
+server.out.log
+server.err.log
+npm-debug.log*

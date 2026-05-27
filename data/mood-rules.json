@@ -1,0 +1,8 @@
+{
+  "rules": [
+    { "keywords": ["累", "安静", "不悲伤"], "target": "Monday Night Exhale", "channel": "情绪回温" },
+    { "keywords": ["工作", "专注", "代码"], "target": "Open Eye Signal", "channel": "深度工作" },
+    { "keywords": ["睡", "夜", "慢"], "target": "Fade Into You", "channel": "夜间慢放" },
+    { "keywords": ["中文", "熟悉"], "target": "分分钟需要你", "channel": "温柔中文" }
+  ]
+}

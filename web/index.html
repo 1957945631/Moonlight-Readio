@@ -1,0 +1,180 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Moonlight - 私人情绪音乐电台</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="ambient-scene" aria-hidden="true"></div>
+  <audio id="audioPlayer" preload="metadata"></audio>
+  <main class="app">
+    <div class="shell">
+      <aside class="panel sidebar">
+        <div class="brand">
+          <div class="logo-row">
+            <div class="logo"><span class="brand-word">Moonlight</span></div>
+          </div>
+          <div class="status"><span class="dot"></span> On air · private mood radio</div>
+          <div class="integration-row" aria-label="真实服务连接状态">
+            <div class="integration-pill"><span id="aiStatus">AI 模拟中</span><strong>AI</strong></div>
+            <div class="integration-pill"><span id="musicStatus">网易云待授权</span><strong>Music</strong></div>
+            <div class="integration-pill"><span id="playbackStatus">模拟播放</span><strong>Source</strong></div>
+          </div>
+        </div>
+
+        <section class="section">
+          <div class="section-title"><span>Schedule</span><span>Today</span></div>
+          <div class="schedule-item active">
+            <div class="time">09:00-11:00</div>
+            <div class="schedule-name">情绪回温</div>
+            <div class="schedule-desc">给刚醒来的脑子一点缓冲，低速、柔软、带空气感。</div>
+          </div>
+          <div class="schedule-item">
+            <div class="time">14:00-16:00</div>
+            <div class="schedule-name">深度陪伴</div>
+            <div class="schedule-desc">适合写东西、整理思绪，保持专注但不紧绷。</div>
+          </div>
+          <div class="schedule-item">
+            <div class="time">22:00-00:00</div>
+            <div class="schedule-name">夜间慢放</div>
+            <div class="schedule-desc">减少刺激，像有人在旁边轻声把一天收起来。</div>
+          </div>
+        </section>
+
+        <div class="section-title" style="padding: 0 18px;"><span>频道库</span><span>Library</span></div>
+        <div class="chips">
+          <span class="chip">私人 DJ</span>
+          <span class="chip">低速呼吸</span>
+          <span class="chip">夜间慢放</span>
+          <span class="chip">深度工作</span>
+          <span class="chip">中文独立</span>
+          <span class="chip">雨夜房间</span>
+        </div>
+
+        <div class="footer-stat">
+          <div><div class="stat-label">今日节目</div><div class="stat-value">3</div></div>
+          <div><div class="stat-label">收藏</div><div class="stat-value" id="likedCount">0</div></div>
+          <div><div class="stat-label">队列</div><div class="stat-value">6</div></div>
+        </div>
+      </aside>
+
+      <section class="panel main">
+        <header class="topbar">
+          <div>
+            <div class="clock" id="clock">11:14</div>
+            <div class="date">Tuesday · 26 May · tuned for you</div>
+          </div>
+          <div class="signal-card">
+            <div class="signal-label">调频状态</div>
+            <div class="signal-grid">
+              <div class="signal-row"><span>频道</span><strong id="signalChannel">情绪回温</strong></div>
+              <div class="signal-row"><span>来源</span><strong id="signalSource">当前时段 + 默认口味</strong></div>
+              <div class="signal-row"><span>策略</span><strong id="signalStrategy">先放慢，再进入今天</strong></div>
+            </div>
+          </div>
+        </header>
+
+        <div class="stage">
+          <article class="cover-card">
+            <div class="album-mark">Now broadcasting</div>
+            <div class="visualizer" aria-hidden="true">
+              <span class="bar" style="height:34px"></span>
+              <span class="bar" style="height:52px"></span>
+              <span class="bar" style="height:68px"></span>
+              <span class="bar" style="height:42px"></span>
+              <span class="bar" style="height:58px"></span>
+              <span class="bar" style="height:28px"></span>
+              <span class="bar" style="height:64px"></span>
+              <span class="bar" style="height:46px"></span>
+              <span class="bar" style="height:36px"></span>
+              <span class="bar" style="height:70px"></span>
+            </div>
+            <div class="signal-flow" aria-label="调频信号路径">
+              <span class="flow-node">口味资料</span>
+              <span class="flow-arrow">→</span>
+              <span class="flow-node" id="flowInput">当前时段</span>
+              <span class="flow-arrow">→</span>
+              <span class="flow-node">推荐队列</span>
+            </div>
+            <div class="channel-name" id="channelName">情绪回温频道 · low-speed breath</div>
+            <h1 class="track-title" id="trackTitle">Monday Night Exhale</h1>
+            <div class="track-artist" id="trackArtist">If · Bread</div>
+          </article>
+
+          <article class="player-card">
+            <div class="now-tag"><span class="dot"></span> <span id="liveStatus">月亮 DJ is speaking...</span></div>
+            <div class="control-row">
+              <button class="icon-btn" type="button" id="prevBtn" aria-label="上一首">⏮</button>
+              <button class="icon-btn primary" type="button" id="playBtn" aria-label="播放或暂停">▶</button>
+              <button class="icon-btn" type="button" id="nextBtn" aria-label="下一首">⏭</button>
+              <button class="icon-btn" type="button" id="favBtn" aria-label="收藏">♡</button>
+              <div class="volume-control" aria-label="当前音量">
+                <span>VOL</span>
+                <input class="volume-slider" id="volumeSlider" type="range" min="0" max="100" value="64" aria-label="音量" />
+                <span id="volumeValue">64</span>
+              </div>
+            </div>
+            <div class="progress-wrap">
+              <div class="time-row"><span id="elapsed">1:26</span><span id="duration">3:14</span></div>
+              <div class="progress"><span id="progressBar"></span></div>
+            </div>
+            <div class="dj-card">
+              <div class="dj-section-label">月亮 DJ 正在说</div>
+              <div class="dj-meta">月亮 DJ · 0:05</div>
+              <p class="dj-line" id="djLine">这首适合放在你刚开始整理思绪的时候。它不会催你，只是把房间里的空气<span class="highlight">慢慢调亮</span>一点。</p>
+              <div class="dj-meta">月亮 DJ · 0:18</div>
+              <p class="dj-line">如果今天有点累，先不用进入状态，跟着节奏呼吸两分钟就够了。</p>
+              <div class="dj-reason-box">
+                <div class="dj-section-label">为什么播这首</div>
+                <p class="dj-line" id="djReasonInline">木吉他和低速人声不会抢走注意力，适合从杂乱状态里慢慢回到自己。</p>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="prompt-bar">
+          <div class="prompt-hint">你可以说状态、场景、想避开的音乐；Moonlight 会据此调整频道和下一首。</div>
+          <input class="prompt-input" id="moodInput" placeholder="和月亮 DJ 说：我现在有点累，想听安静但不悲伤的歌..." />
+          <button class="send-btn" type="button" id="sendBtn">发送给 DJ</button>
+        </div>
+      </section>
+
+      <aside class="panel queue">
+        <div class="queue-header">
+          <div class="queue-title">
+            <h2>今日播控台</h2>
+            <span class="count">6 TRACKS</span>
+          </div>
+          <div class="mood-card" id="moodCard">当前摘要：还没有新的输入，Moonlight 正在按当前时段和默认口味播出。</div>
+        </div>
+        <details class="insight-stack" open>
+          <summary>推荐说明</summary>
+          <div class="insight-card">
+            <div class="insight-label">Why this song</div>
+            <div class="insight-copy" id="reasonCopy">选它是因为木吉他和低速人声不会抢走注意力，适合从杂乱状态里慢慢回到自己。</div>
+          </div>
+          <div class="insight-card">
+            <div class="insight-label">Next from DJ</div>
+            <div class="insight-copy" id="nextCopy">下一段会把节奏再压低一点，接到一首更适合夜间整理的歌。</div>
+          </div>
+          <div class="insight-card">
+            <div class="insight-label">Context used</div>
+            <div class="context-list" id="contextCopy">
+              <div><span>时间</span><strong>当前时段</strong></div>
+              <div><span>频道</span><strong>情绪回温</strong></div>
+              <div><span>收藏偏好</span><strong>暂无收藏</strong></div>
+              <div><span>最近输入</span><strong>默认播出</strong></div>
+            </div>
+          </div>
+        </details>
+        <div class="track-list" id="trackList"></div>
+      </aside>
+    </div>
+  </main>
+
+  <script src="../src/moonlight-core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

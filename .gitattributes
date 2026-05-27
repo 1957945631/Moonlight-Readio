@@ -1,0 +1,9 @@
+* text=auto
+
+*.dll binary
+*.exe binary
+*.com binary
+*.ico binary
+*.pdf binary
+*.png binary
+*.7z binary
