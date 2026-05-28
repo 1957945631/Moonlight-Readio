@@ -834,7 +834,9 @@
           currentIndex = 0;
           currentTrack = normalizeTrack(result.currentTrack || result.track || queue[0], 0);
           queue[0] = currentTrack;
-          playback = result.playback && result.playback.mode === "cli" ? result.playback : playbackFromTrack(currentTrack);
+          playback = result.playback && ["cli", "stream"].includes(result.playback.mode)
+            ? result.playback
+            : playbackFromTrack(currentTrack);
           elapsedNow = 0;
         }
         conversation = Array.isArray(result.conversation) ? result.conversation : conversation;
