@@ -570,6 +570,50 @@
         return "模拟播放";
       }
 
+      function describeNeteaseStatus(music) {
+        if (!music || !music.configured) return "网易云 API 未配置";
+        if (music.reachable === false) return "网易云 API 不可达";
+        if (!music.supportsSearch) return "网易云搜索不可用";
+        if (!music.loggedIn && !music.supportsPlaybackUrl) return "搜索可用，未登录/播放受限";
+        if (!music.supportsPlaybackUrl) return "搜索可用，播放受限";
+        if (!music.loggedIn) return "API 可用，未登录";
+        return "网易云 API 已就绪";
+      }
+
+      function tickClock() {
+        const now = new Date();
+        byId("clock").textContent = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      }
+
+      function syncRecommendationPanel() {
+        const panel = document.querySelector(".insight-stack");
+        if (panel) panel.open = window.innerWidth > 820;
+      }
+
+      async function hydrateBackendStatus() {
+        try {
+          const response = await fetch(`${apiBase}/api/status`);
+          if (!response.ok) throw new Error("status unavailable");
+          const status = await response.json();
+          let musicText = "本地曲库";
+          if (status.music.provider === "netease-cli") {
+            if (!status.music.configured) musicText = "网易云 CLI 未配置";
+            else if (!status.music.loggedIn) musicText = "网易云 CLI 未登录";
+            else if (!status.music.playerReady) musicText = "网易云 CLI 缺少播放器";
+            else if (!status.music.supportsSearch) musicText = "网易云 CLI 无搜索命令";
+            else musicText = "网易云 CLI 已就绪";
+          } else if (status.music.provider === "netease") {
+            musicText = describeNeteaseStatus(status.music);
+          }
+          setStatuses({
+            ai: status.ai.provider === "openai" && status.ai.configured ? "AI 已连接" : "AI 模拟中",
+            music: musicText,
+          });
+        } catch {
+          setStatuses({ ai: "本地规则", music: "后端未连接", playback: "模拟播放" });
+        }
+      }
+
       function playbackFromTrack(track) {
         if (track.playbackSource && track.playbackSource.mode) return track.playbackSource;
         if (track.originalId && track.encryptedId) return { ...track, mode: "cli", reason: "网易云 CLI 将通过项目内 mpv 播放" };
@@ -1085,5 +1129,9 @@
       renderConversation();
       renderSignal();
       markActiveChannel();
+      syncRecommendationPanel();
+      tickClock();
+      window.addEventListener("resize", syncRecommendationPanel);
+      setInterval(tickClock, 1000);
       setInterval(syncCliState, 2000);
     })();
