@@ -853,6 +853,7 @@
         });
         if (result.ai && result.ai.status === "fallback") {
           const detail = result.ai.error ? `：${result.ai.error}` : "";
+          setStatuses({ ai: result.ai.error ? `AI 失败：${result.ai.error}` : "AI 请求失败，已回退本地规则" });
           ui.liveStatus.textContent = `AI 临时失败，已用本地 DJ 规则接上${detail}`;
           ui.moodCard.textContent = `${ui.moodCard.textContent} AI 本次没有成功返回，页面先用本地规则继续。`;
         } else {
