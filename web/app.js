@@ -711,7 +711,10 @@
       }
 
       async function playCurrent() {
-        playback = playbackFromTrack(currentTrack);
+        const keepsCurrentPlayback = playback
+          && ["cli", "stream"].includes(playback.mode)
+          && (!playback.originalId || !currentTrack.originalId || String(playback.originalId) === String(currentTrack.originalId));
+        playback = keepsCurrentPlayback ? playback : playbackFromTrack(currentTrack);
         setStatuses({ playback: statusText(playback.mode) });
         if (playback.mode === "stream") {
           ui.audio.src = playback.url;
