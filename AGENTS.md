@@ -1,95 +1,89 @@
 # Moonlight Agent 指南
 
-这份文档给后续参与 Moonlight 项目的 coding agent 使用。目标是让接手者快速理解项目边界、文件职责和开发规则。
+这份文档给后续参与 Moonlight 的 coding agent 使用。目标是快速理解项目边界、关键文件、近期决策和容易踩坑的地方。
 
 ## 项目目标
 
-Moonlight 是一个本地运行的私人 AI 音乐电台原型。理想体验是：用户可以像和老朋友聊天一样与“月亮 DJ”交流，DJ 会理解用户状态、生成可播放歌单、介绍歌曲，并通过后端控制本地播放。
+Moonlight 是一个 AI 私人音乐电台原型。用户像和老朋友聊天一样与“月亮 DJ”交流，DJ 理解状态、生成可播放队列、介绍歌曲，并通过后端保护 AI key、音乐源配置和播放能力。
 
-当前范围：
+当前同时支持：
 
-- 本地 Web 应用：`http://localhost:8787/`。
-- 后端负责保护 AI key、音乐平台凭证和播放控制。
-- AI 支持 OpenAI 兼容接口，也保留 mock 回退。
-- 音乐播放通过网易云音乐 CLI 和项目内 `tools/mpv/mpv.exe` 完成。
-- 不绕过音乐平台版权、授权或播放限制。
+- 本地 Web 应用：`http://localhost:8787/`
+- Cloudflare Worker 公开部署：`https://moonlightdio.peifengwu622.workers.dev/`
+- AI：OpenAI 兼容接口，当前云端配置 DeepSeek。
+- 音乐：云端使用 Vercel 网易云 API；本地可使用 local 或 netease-cli。
 
-## 项目结构
+## 当前云端配置
 
-```text
-.
-+-- server.js                   # 本地 HTTP 服务、静态文件、/api 路由
-+-- web/
-|   +-- index.html              # 当前单页 UI 结构
-|   +-- styles.css              # 前端样式
-|   +-- app.js                  # 前端交互逻辑
-+-- src/
-|   +-- moonlight-core.js        # 本地默认曲库、节目单、状态辅助函数
-|   +-- radio-service.js         # 电台编排核心：意图判断、队列、DJ 回复
-|   +-- env.js                   # 轻量 .env 加载器
-|   +-- providers/
-|       +-- ai-provider.js       # AI 适配器和结构化结果归一化
-|       +-- music-provider.js    # 本地、网易云、网易云 CLI 音乐适配器
-+-- data/                        # 口味、日程、歌单和情绪规则上下文
-+-- tests/                       # 核心逻辑和 Provider 合约测试
-+-- tools/mpv/                   # 项目内 mpv 播放器
-+-- logs/                        # 运行日志，已忽略
-+-- .env                         # 本地密钥，已忽略
-```
-
-## 运行与验证
-
-```powershell
-npm start
-npm test
-```
-
-打开应用：
+非密钥变量在 `wrangler.jsonc`：
 
 ```text
-http://localhost:8787/
+AI_PROVIDER=openai
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_MODEL=deepseek-v4-flash
+OPENAI_API_STYLE=chat
+MUSIC_PROVIDER=netease
+NETEASE_API_BASE=https://api-enhanced-umber-ten.vercel.app
+NETEASE_REAL_IP=116.25.146.177
+NETEASE_AUDIO_LEVEL=standard
 ```
 
-常用检查：
+密钥只在 Cloudflare Secret：
 
-```powershell
-Invoke-RestMethod http://localhost:8787/api/status
-Invoke-RestMethod http://localhost:8787/api/music/state
-npm run ncm -- login --check
+```text
+OPENAI_API_KEY
 ```
 
-## 关键行为规则
+不要把 API key、Cookie、token、PrivateKey 写进 Git。
 
-- 普通聊天、歌单生成、播放控制必须解耦。
-- 普通聊天不能换队列、不能重播、不能重置进度、不能停止音乐。
-- 只有明确“推荐、换歌、调频、切频道”等意图时，才允许 `queueChanged: true`。
-- 不可播放歌曲不能留在右侧可见歌单里。
-- 如果 CLI 播放某首失败，应从当前队列移除该歌曲，并尝试下一首可播放歌曲。
-- 右侧“今日播控台”默认只展示歌曲列表，除非用户明确要求恢复说明卡。
-- 月亮 DJ 的语气应温柔、熟悉、克制、自然，避免机械分条回复。
+## 关键文件
 
-## API 边界
+```text
+web/index.html              单页 UI 结构
+web/styles.css              前端样式
+web/app.js                  当前唯一活跃的前端交互入口
+web/moonlight-core.js       给 Cloudflare 静态资源使用的浏览器版 core 副本
+src/moonlight-core.js       本地默认曲库、节目单、状态辅助函数
+src/api-handler.js          /api 路由分发
+src/radio-service.js        意图判断、队列生成、DJ 回复、可播放过滤
+src/providers/ai-provider.js
+src/providers/music-provider.js
+server.js                   本地 Node HTTP 服务
+worker/index.js             Cloudflare Worker 入口
+wrangler.jsonc              Cloudflare 非敏感配置
+```
 
-前端只能调用后端 `/api/*`，不能直接调用 AI 服务或音乐平台凭证。
+## 前端交互注意事项
 
-主要接口：
+`web/app.js` 现在只保留一个活跃 IIFE。不要重新引入旧版 bootstrap 或重复绑定同一批 DOM 事件。
 
-- `GET /api/status`
-- `POST /api/radio/chat`
-- `POST /api/radio/channel`
-- `POST /api/radio/plan`
-- `POST /api/radio/next`
-- `GET /api/music/state`
-- `POST /api/music/play`
-- `POST /api/music/stop`
-- `POST /api/music/seek`
-- `POST /api/music/volume`
-- `GET /api/music/search?q=...`
-- `GET /api/music/playback/:trackId`
+云端播放链路：
+
+1. `/api/radio/chat` 返回队列和当前首歌的 `playback`。
+2. 自动播放当前首歌时保留后端返回的 `stream`。
+3. 用户点今日播控台、上一首、下一首时，前端必须调用 `/api/music/playback/:id` 重新解析该歌曲播放源。
+4. `stream` 交给 `<audio>` 播放；不要用 `externalUrl` 覆盖 `stream`。
+5. `stream` 模式只更新 `<audio>.volume/currentTime`，不要轮询 CLI `/api/music/state`。
+6. `external` 只用于不可站内播放的兜底，不应该出现在可见推荐队列。
+
+最近修过的回归点：
+
+- 今日播控台点歌、上一首、下一首、播放按钮曾经因为只拿 `externalUrl` 而跳网易云外链。
+- 音量滑块曾经在云端 stream 模式下混用 CLI 音量接口。
+- 旧版和新版前端逻辑曾经同时运行，导致状态互相覆盖。
+
+改前端播放交互后，必须用浏览器实际验证：
+
+- 生成网易云队列。
+- 点今日播控台第 2 首。
+- 点上一首、下一首。
+- 点播放/暂停。
+- 调整音量。
+- 确认没有打开外部标签页，控制台没有 error。
 
 ## Provider 合约
 
-AI Provider 输出会被归一化为：
+AI Provider 归一化输出：
 
 - `djText`
 - `whyThisSong`
@@ -103,7 +97,7 @@ AI Provider 输出会被归一化为：
 - `avoidRules`
 - `trackIntro`
 
-Music Provider 应暴露：
+Music Provider 暴露：
 
 - `searchTracks(query, mood)`
 - `getTrackDetail(id)`
@@ -114,19 +108,43 @@ Music Provider 应暴露：
 - `seekPlayback(seconds)`
 - `setVolume(level)`
 
-可进入推荐列表的播放模式只有：
+可进入推荐队列的播放模式只有：
 
 - `cli`
 - `stream`
 
-不要把 `external` 或 `unavailable` 歌曲放进可见推荐队列。
+## 行为规则
 
-## 开发注意事项
+- 普通聊天不能换队列、不能重播、不能重置进度、不能停止音乐。
+- 只有明确“推荐、换歌、调频、切频道、想听某类歌”等意图时，才允许 `queueChanged=true`。
+- 不可播放歌曲不能留在右侧可见歌单里。
+- 云端不能依赖本地 `netease-cli`、`mpv.exe` 或本机 PATH。
+- 不绕过网易云版权、授权或播放限制。
 
-- 优先做小范围、低风险修改。前端已拆到 `web/index.html`、`web/styles.css`、`web/app.js`；除非明确做前端重构，否则不要继续大拆。
-- 后端适配器必须能在没有真实 AI 或真实网易云播放的情况下测试。
-- 不要打印或提交 `.env`、API key、AppSecret、PrivateKey。
-- 运行产物不要进入源码管理：`node_modules/`、`logs/`、`server*.log`、`tools/_downloads/`。
-- 改动用户可见行为时，优先补充 `tests/provider-contract.test.js` 或 `tests/moonlight-core.test.js`。
-- 完成前至少运行 `npm test`，并检查 `web/app.js` 能被解析。
-后续产品行为修复应继续保持小范围修改，不要和进一步前端模块化混在一起。
+## 运行与验证
+
+```powershell
+npm start
+npm test
+node --check web\app.js
+Invoke-RestMethod http://localhost:8787/api/status
+```
+
+公网接口检查：
+
+```text
+GET https://moonlightdio.peifengwu622.workers.dev/api/status
+GET https://moonlightdio.peifengwu622.workers.dev/api/music/search?q=月亮
+GET https://moonlightdio.peifengwu622.workers.dev/api/music/playback/ncm:212412
+POST https://moonlightdio.peifengwu622.workers.dev/api/radio/chat
+```
+
+## 文档维护
+
+结构和部署变化时同步更新：
+
+- `README.md`
+- `AGENTS.md`
+- `docs/PROJECT_STRUCTURE.md`
+- `docs/CLOUD_DEPLOYMENT.md`
+- `docs/FRONTEND_INTERACTIONS.md`
