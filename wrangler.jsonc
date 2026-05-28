@@ -13,8 +13,8 @@
   },
   "vars": {
     "AI_PROVIDER": "openai",
-    "OPENAI_BASE_URL": "http://16.176.195.43:3000",
-    "OPENAI_MODEL": "claude-sonnet-4.5",
+    "OPENAI_BASE_URL": "https://api.deepseek.com",
+    "OPENAI_MODEL": "deepseek-v4-flash",
     "OPENAI_API_STYLE": "chat",
     "MUSIC_PROVIDER": "netease",
     "NETEASE_API_BASE": "https://api-enhanced-umber-ten.vercel.app",
