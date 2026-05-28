@@ -598,11 +598,13 @@
         volumeNow = clamp(Math.round(level), 0, 100);
         localStorage.setItem("moonlight-volume", String(volumeNow));
         renderPlayer();
-        fetch(`${apiBase}/api/music/volume`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ volume: volumeNow }),
-        }).catch(() => {});
+        if (playback.mode === "cli") {
+          fetch(`${apiBase}/api/music/volume`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ volume: volumeNow }),
+          }).catch(() => {});
+        }
         ui.audio.volume = volumeNow / 100;
       }
 
