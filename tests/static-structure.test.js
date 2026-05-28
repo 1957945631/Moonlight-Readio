@@ -17,15 +17,17 @@ const root = path.resolve(__dirname, "..");
 const webIndexPath = path.join(root, "web", "index.html");
 const webCssPath = path.join(root, "web", "styles.css");
 const webAppPath = path.join(root, "web", "app.js");
+const webCorePath = path.join(root, "web", "moonlight-core.js");
 
 test("frontend assets live under web with external css and script files", () => {
   assert.equal(fs.existsSync(webIndexPath), true);
   assert.equal(fs.existsSync(webCssPath), true);
   assert.equal(fs.existsSync(webAppPath), true);
+  assert.equal(fs.existsSync(webCorePath), true);
 
   const html = fs.readFileSync(webIndexPath, "utf8");
   assert.match(html, /<link rel="stylesheet" href="styles\.css">/);
-  assert.match(html, /<script src="\.\.\/src\/moonlight-core\.js"><\/script>/);
+  assert.match(html, /<script src="moonlight-core\.js"><\/script>/);
   assert.match(html, /<script src="app\.js"><\/script>/);
   assert.doesNotMatch(html, /<style>/);
   assert.doesNotMatch(html, /<script>\s*const API_BASE/);
