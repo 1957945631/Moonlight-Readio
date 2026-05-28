@@ -1,4 +1,9 @@
-﻿    const {
+﻿/*
+ * Legacy bootstrap kept for reference but disabled.
+ * The active app starts at the IIFE below. Running both versions caused
+ * duplicate timers and stale playback state to override cloud stream playback.
+
+    const {
       TRACKS: tracks,
       getInitialState,
       routeMoodInput,
@@ -439,6 +444,8 @@
     tickClock();
     setInterval(tickClock, 1000);
 
+*/
+
     (() => {
       const core = window.MoonlightCore;
       const apiBase = location.protocol === "file:" ? "http://localhost:8787" : "";
@@ -564,10 +571,40 @@
       }
 
       function playbackFromTrack(track) {
+        if (track.playbackSource && track.playbackSource.mode) return track.playbackSource;
         if (track.originalId && track.encryptedId) return { ...track, mode: "cli", reason: "网易云 CLI 将通过项目内 mpv 播放" };
         if (track.audioUrl) return { mode: "stream", url: track.audioUrl, reason: "本地授权音频" };
         if (track.externalUrl) return { mode: "external", url: track.externalUrl, reason: "这首需要在网易云外部打开" };
         return { mode: "unavailable", reason: "当前没有可播放音源" };
+      }
+
+      function isPlaybackForTrack(source, track) {
+        if (!source || !track) return false;
+        if (source.originalId && track.originalId) return String(source.originalId) === String(track.originalId);
+        return !source.originalId || !track.originalId;
+      }
+
+      async function resolvePlaybackForTrack(track, currentSource) {
+        if (currentSource && ["cli", "stream"].includes(currentSource.mode) && isPlaybackForTrack(currentSource, track)) {
+          return currentSource;
+        }
+        if (track.playbackSource && ["cli", "stream"].includes(track.playbackSource.mode)) {
+          return track.playbackSource;
+        }
+        if (track.id && String(track.id).startsWith("ncm:")) {
+          try {
+            const response = await fetch(`${apiBase}/api/music/playback/${encodeURIComponent(track.id)}`);
+            if (response.ok) {
+              const source = await response.json();
+              track.playbackSource = source;
+              if (source && source.mode) {
+                setStatuses({ playback: statusText(source.mode) });
+                return source;
+              }
+            }
+          } catch {}
+        }
+        return playbackFromTrack(track);
       }
 
       function setStatuses(values) {
@@ -711,13 +748,11 @@
       }
 
       async function playCurrent() {
-        const keepsCurrentPlayback = playback
-          && ["cli", "stream"].includes(playback.mode)
-          && (!playback.originalId || !currentTrack.originalId || String(playback.originalId) === String(currentTrack.originalId));
-        playback = keepsCurrentPlayback ? playback : playbackFromTrack(currentTrack);
+        playback = await resolvePlaybackForTrack(currentTrack, playback);
         setStatuses({ playback: statusText(playback.mode) });
         if (playback.mode === "stream") {
           ui.audio.src = playback.url;
+          ui.audio.volume = volumeNow / 100;
           await ui.audio.play().then(() => {
             playingNow = true;
             introduceCurrentTrack();
@@ -836,6 +871,7 @@
           queue = (Array.isArray(result.queue) && result.queue.length ? result.queue : queue).map(normalizeTrack);
           currentIndex = 0;
           currentTrack = normalizeTrack(result.currentTrack || result.track || queue[0], 0);
+          if (result.playback && result.playback.mode) currentTrack.playbackSource = result.playback;
           queue[0] = currentTrack;
           playback = result.playback && ["cli", "stream"].includes(result.playback.mode)
             ? result.playback
@@ -936,6 +972,14 @@
       }
 
       async function syncCliState() {
+        if (playback.mode !== "cli") {
+          if (playback.mode === "stream") {
+            if (Number.isFinite(ui.audio.currentTime)) elapsedNow = Math.floor(ui.audio.currentTime);
+            playingNow = !ui.audio.paused && !ui.audio.ended;
+            renderPlayer();
+          }
+          return;
+        }
         try {
           const response = await fetch(`${apiBase}/api/music/state`);
           if (!response.ok) return;
@@ -1022,6 +1066,11 @@
       ui.volumeSlider.addEventListener("change", setVolumeByEvent);
       ui.audio.addEventListener("ended", () => {
         advanceToNextTrack("上一首播完了，Moonlight 正在接下一首。");
+      });
+      ui.audio.addEventListener("timeupdate", () => {
+        if (playback.mode !== "stream") return;
+        elapsedNow = Math.floor(ui.audio.currentTime || 0);
+        renderPlayer();
       });
       document.querySelectorAll(".schedule-item").forEach((item, index) => {
         item.addEventListener("click", () => tuneChannel(scheduleChannels[index]));
