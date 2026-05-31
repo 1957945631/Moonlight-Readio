@@ -50,6 +50,7 @@
         { id: "deep", label: "深度陪伴" },
         { id: "night", label: "夜间慢放" },
       ];
+      const BLOCKED_TRACKS_KEY = "moonlight-blocked-tracks";
       const libraryChannels = [
         { id: "private", label: "私人 DJ" },
         { id: "breathe", label: "低速呼吸" },
@@ -76,6 +77,12 @@
         const seconds = Math.max(0, Math.floor(Number(value) || 0));
         return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
       };
+      function resolveScheduleFromTime(now = new Date()) {
+        const hour = now.getHours();
+        if (hour >= 5 && hour < 11) return scheduleChannels[0];
+        if (hour >= 11 && hour < 17) return scheduleChannels[1];
+        return scheduleChannels[2];
+      }
 
       const liked = new Set(JSON.parse(localStorage.getItem("moonlight-liked") || "[]"));
       let state = core.getInitialState(liked);
@@ -86,10 +93,10 @@
       let playingNow = false;
       let elapsedNow = 0;
       let volumeNow = clamp(Number(localStorage.getItem("moonlight-volume") || 64), 0, 100);
-      let channel = { id: "warm", label: "情绪回温" };
+      let channel = resolveScheduleFromTime();
       let conversation = [];
       let recentTrackIds = JSON.parse(localStorage.getItem("moonlight-recent-tracks") || "[]");
-      let blockedTrackIds = [];
+      let blockedTrackIds = JSON.parse(localStorage.getItem(BLOCKED_TRACKS_KEY) || "[]");
       let lastIntroducedTrackId = "";
       let autoAdvancing = false;
 
@@ -112,6 +119,12 @@
         if (!track || !track.id) return;
         recentTrackIds = [track.id, ...recentTrackIds.filter((id) => id !== track.id)].slice(0, 24);
         localStorage.setItem("moonlight-recent-tracks", JSON.stringify(recentTrackIds));
+      }
+
+      function blockTrack(track) {
+        if (!track || !track.id) return;
+        blockedTrackIds = [track.id, ...blockedTrackIds.filter((id) => id !== track.id)].slice(0, 50);
+        localStorage.setItem(BLOCKED_TRACKS_KEY, JSON.stringify(blockedTrackIds));
       }
 
       function statusText(mode) {
@@ -273,6 +286,7 @@
       }
 
       function describeTrackForDj(track) {
+        if (track && track.trackIntro) return track.trackIntro;
         const title = track.title || "这首歌";
         const artist = track.artist || "这位音乐人";
         const mood = track.mood || track.channelShort || channel.label || "当前频道";
@@ -343,18 +357,78 @@
         }
       }
 
+      async function requestReplacementQueueAfterFailure() {
+        ui.liveStatus.textContent = "这首歌单暂时都拿不到音源，我帮你换一组试试。";
+        try {
+          const response = await fetch(`${apiBase}/api/radio/plan`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: "换一组能播放的歌",
+              channel: channel.id,
+              conversation,
+              queue,
+              currentTrack,
+              recentTrackIds,
+              blockedTrackIds,
+              state: {
+                current: currentIndex,
+                likedTitles: state.likedTitles,
+                lastInput: state.lastInput,
+              },
+            }),
+          });
+          if (!response.ok) throw new Error(`plan failed ${response.status}`);
+          await applyRadioResult(await response.json(), "");
+        } catch {
+          playingNow = false;
+          currentTrack = normalizeTrack(core.TRACKS[0], 0);
+          currentIndex = 0;
+          playback = { mode: "unavailable", reason: "当前歌单没有可播放音源" };
+          renderQueue();
+          renderPlayer();
+        }
+      }
+
+      async function skipToNextAfterFailure(failedTrack, reason) {
+        playingNow = false;
+        blockTrack(failedTrack);
+        const failedTitle = failedTrack && failedTrack.title ? failedTrack.title : "这首歌";
+        if (failedTrack && failedTrack.id) {
+          queue = queue.filter((track) => track.id !== failedTrack.id);
+        }
+        conversation.push({
+          role: "dj",
+          text: `《${failedTitle}》这首暂时播不了，我把它从这次歌单里拿掉，直接换下一首。`,
+        });
+        saveConversation();
+        renderConversation();
+
+        if (queue.length) {
+          const nextIndex = clamp(currentIndex, 0, queue.length - 1);
+          renderQueue();
+          await selectQueueTrack(nextIndex);
+          return;
+        }
+
+        playback = { mode: "unavailable", reason: reason || "当前歌单没有可播放音源" };
+        renderQueue();
+        renderPlayer();
+        await requestReplacementQueueAfterFailure();
+      }
+
       async function playCurrent() {
         playback = await resolvePlaybackForTrack(currentTrack, playback);
         setStatuses({ playback: statusText(playback.mode) });
         if (playback.mode === "stream") {
-          ui.audio.src = playback.url;
+          const streamUrl = new URL(playback.url, location.href).href;
+          if (ui.audio.src !== streamUrl) ui.audio.src = playback.url;
           ui.audio.volume = volumeNow / 100;
           await ui.audio.play().then(() => {
             playingNow = true;
             introduceCurrentTrack();
           }).catch(() => {
-            playingNow = false;
-            ui.liveStatus.textContent = "音频播放失败";
+            return skipToNextAfterFailure(currentTrack, "音频播放失败");
           });
           return;
         }
@@ -378,31 +452,12 @@
             }
             if (result.ok) introduceCurrentTrack();
             if (!result.ok) {
-              if (currentTrack.id && !blockedTrackIds.includes(currentTrack.id)) blockedTrackIds.push(currentTrack.id);
-              const failedTitle = currentTrack.title;
-              queue = queue.filter((track) => track.id !== currentTrack.id);
-              conversation.push({
-                role: "dj",
-                text: `《${failedTitle}》这首暂时播不了，我把它从这次歌单里拿掉，直接换下一首。`,
-              });
-              saveConversation();
-              renderConversation();
-              if (queue.length) {
-                const nextIndex = clamp(currentIndex, 0, queue.length - 1);
-                renderQueue();
-                await selectQueueTrack(nextIndex);
-              } else {
-                currentTrack = normalizeTrack(core.TRACKS[0], 0);
-                currentIndex = 0;
-                playback = { mode: "unavailable", reason: result.reason || "当前歌单没有可播放音源" };
-                renderQueue();
-                renderPlayer();
-              }
+              await skipToNextAfterFailure(currentTrack, result.reason || "网易云 CLI 播放失败");
             }
           } catch {
             playingNow = false;
-            ui.liveStatus.textContent = "网易云 CLI 播放失败";
             setStatuses({ playback: "CLI 播放失败" });
+            await skipToNextAfterFailure(currentTrack, "网易云 CLI 播放失败");
           }
           renderPlayer();
           return;
@@ -467,6 +522,7 @@
           queue = (Array.isArray(result.queue) && result.queue.length ? result.queue : queue).map(normalizeTrack);
           currentIndex = 0;
           currentTrack = normalizeTrack(result.currentTrack || result.track || queue[0], 0);
+          if (result.dj && result.dj.trackIntro) currentTrack.trackIntro = result.dj.trackIntro;
           if (result.playback && result.playback.mode) currentTrack.playbackSource = result.playback;
           queue[0] = currentTrack;
           playback = result.playback && ["cli", "stream"].includes(result.playback.mode)
@@ -493,8 +549,6 @@
           setStatuses({ ai: result.ai.error ? `AI 失败：${result.ai.error}` : "AI 请求失败，已回退本地规则" });
           ui.liveStatus.textContent = `AI 临时失败，已用本地 DJ 规则接上${detail}`;
           ui.moodCard.textContent = `${ui.moodCard.textContent} AI 本次没有成功返回，页面先用本地规则继续。`;
-        } else {
-          ui.liveStatus.textContent = "月亮 DJ 正在说话...";
         }
         renderSignal();
         renderConversation();
@@ -510,8 +564,7 @@
 
       async function sendToDj(text) {
         ui.sendBtn.disabled = true;
-        ui.sendBtn.textContent = "调频中";
-        ui.liveStatus.textContent = "正在生成 DJ 串场...";
+        ui.sendBtn.textContent = "…";
         setStatuses({ ai: "AI 生成中" });
         try {
           const response = await fetch(`${apiBase}/api/radio/chat`, {

@@ -45,3 +45,21 @@ test("server updates the inherited path variable without creating Windows duplic
   assert.doesNotMatch(server, /process\.env\.Path\s*=/);
   assert.doesNotMatch(server, /process\.env\.PATH\s*=/);
 });
+
+test("frontend playback guards stream resume and failed track recovery", () => {
+  const app = fs.readFileSync(webAppPath, "utf8");
+  assert.match(app, /moonlight-blocked-tracks/);
+  assert.match(app, /function blockTrack\(track\)/);
+  assert.match(app, /async function skipToNextAfterFailure\(failedTrack, reason\)/);
+  assert.match(app, /const streamUrl = new URL\(playback\.url, location\.href\)\.href;/);
+  assert.match(app, /if \(ui\.audio\.src !== streamUrl\) ui\.audio\.src = playback\.url;/);
+  assert.match(app, /await skipToNextAfterFailure\(currentTrack,/);
+});
+
+test("frontend schedule starts from real time and avoids technical DJ status copy", () => {
+  const app = fs.readFileSync(webAppPath, "utf8");
+  assert.match(app, /function resolveScheduleFromTime\(now = new Date\(\)\)/);
+  assert.match(app, /let channel = resolveScheduleFromTime\(\);/);
+  assert.doesNotMatch(app, /正在生成 DJ 串场/);
+  assert.doesNotMatch(app, /月亮 DJ 正在说话/);
+});

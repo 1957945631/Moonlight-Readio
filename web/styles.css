@@ -239,6 +239,11 @@
       box-shadow: inset 3px 0 0 var(--green), 0 12px 28px rgba(0,0,0,.24);
     }
 
+    .schedule-item.active .time,
+    .schedule-item.active .schedule-name {
+      color: var(--green);
+    }
+
     .time {
       color: var(--text);
       font-family: "Courier New", ui-monospace, monospace;
