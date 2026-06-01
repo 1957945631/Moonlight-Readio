@@ -29,6 +29,7 @@
         duration: byId("duration"),
         volumeSlider: byId("volumeSlider"),
         volumeValue: byId("volumeValue"),
+        personaSwitch: byId("personaSwitch"),
         audio: byId("audioPlayer"),
         aiStatus: byId("aiStatus"),
         musicStatus: byId("musicStatus"),
@@ -51,6 +52,11 @@
         { id: "night", label: "夜间慢放" },
       ];
       const BLOCKED_TRACKS_KEY = "moonlight-blocked-tracks";
+      const PERSONA_KEY = "moonlight-dj-persona";
+      const personas = [
+        { id: "moonlight", label: "月亮 DJ" },
+        { id: "luoyonghao-perspective", label: "老罗视角" },
+      ];
       const libraryChannels = [
         { id: "private", label: "私人 DJ" },
         { id: "breathe", label: "低速呼吸" },
@@ -97,8 +103,14 @@
       let conversation = [];
       let recentTrackIds = JSON.parse(localStorage.getItem("moonlight-recent-tracks") || "[]");
       let blockedTrackIds = JSON.parse(localStorage.getItem(BLOCKED_TRACKS_KEY) || "[]");
+      let personaId = resolvePersonaId(localStorage.getItem(PERSONA_KEY));
       let lastIntroducedTrackId = "";
       let autoAdvancing = false;
+
+      function resolvePersonaId(value) {
+        const id = String(value || "").trim();
+        return personas.some((persona) => persona.id === id) ? id : "moonlight";
+      }
 
       function normalizeTrack(track, index) {
         const fallback = core.TRACKS[index % core.TRACKS.length] || core.TRACKS[0];
@@ -270,14 +282,15 @@
       }
 
       function renderConversation() {
+        const persona = personas.find((item) => item.id === personaId) || personas[0];
         const messages = conversation.length ? conversation : [
           { role: "dj", text: "晚上好，我在。你可以直接和我说今天发生了什么、想避开什么声音，或者点左边频道让我先帮你开一段。" },
         ];
         ui.djCard.innerHTML = `
-          <div class="dj-section-label">月亮 DJ</div>
+          <div class="dj-section-label">${html(persona.label)}</div>
           <div class="dj-history">
             ${messages.map((message) => `
-              <p class="dj-message ${message.role === "user" ? "user" : "dj"}">${html(message.role === "user" ? `你：${message.text}` : `月亮：${message.text}`)}</p>
+              <p class="dj-message ${message.role === "user" ? "user" : "dj"}">${html(message.role === "user" ? `你：${message.text}` : `${persona.label}：${message.text}`)}</p>
             `).join("")}
           </div>
         `;
@@ -331,6 +344,20 @@
         });
       }
 
+      function syncPersonaSwitch() {
+        if (!ui.personaSwitch) return;
+        ui.personaSwitch.querySelectorAll(".persona-option").forEach((item) => {
+          item.classList.toggle("active", item.dataset.personaId === personaId);
+        });
+      }
+
+      function setPersona(nextPersonaId) {
+        personaId = resolvePersonaId(nextPersonaId);
+        localStorage.setItem(PERSONA_KEY, personaId);
+        syncPersonaSwitch();
+        renderConversation();
+      }
+
       function setCurrentTrack(track, index) {
         currentIndex = clamp(index, 0, Math.max(queue.length - 1, 0));
         currentTrack = normalizeTrack(track || queue[currentIndex] || core.TRACKS[0], currentIndex);
@@ -366,6 +393,7 @@
             body: JSON.stringify({
               text: "换一组能播放的歌",
               channel: channel.id,
+              personaId,
               conversation,
               queue,
               currentTrack,
@@ -517,6 +545,11 @@
         if (!result || !result.state) return;
         state = result.state;
         channel = result.channel || channel;
+        if (result.dj && result.dj.persona && result.dj.persona.id) {
+          personaId = resolvePersonaId(result.dj.persona.id);
+          localStorage.setItem(PERSONA_KEY, personaId);
+        }
+        const persona = personas.find((item) => item.id === personaId) || personas[0];
         const queueChanged = Boolean(result.queueChanged);
         if (queueChanged) {
           queue = (Array.isArray(result.queue) && result.queue.length ? result.queue : queue).map(normalizeTrack);
@@ -534,8 +567,8 @@
         saveConversation();
         ui.moodCard.textContent = userText
           ? queueChanged
-            ? `你说：“${userText}”。月亮 DJ 已换成一组新的候选。`
-            : `你说：“${userText}”。月亮 DJ 先陪你聊，歌单不打断。`
+            ? `你说：“${userText}”。${persona.label} 已换成一组新的候选。`
+            : `你说：“${userText}”。${persona.label} 先陪你聊，歌单不打断。`
           : `当前频道：${channel.label || state.signal.channel}`;
         ui.reasonCopy.textContent = state.reason || (result.dj && result.dj.reason) || "";
         ui.nextCopy.textContent = state.next || "我会继续听你的状态调整下一首。";
@@ -551,6 +584,7 @@
           ui.moodCard.textContent = `${ui.moodCard.textContent} AI 本次没有成功返回，页面先用本地规则继续。`;
         }
         renderSignal();
+        syncPersonaSwitch();
         renderConversation();
         renderPlayer();
         renderQueue();
@@ -573,6 +607,7 @@
             body: JSON.stringify({
               text,
               channel: channel.id,
+              personaId,
               conversation,
               queue,
               currentTrack,
@@ -611,7 +646,7 @@
           const response = await fetch(`${apiBase}/api/radio/channel`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ channel: nextChannel.id, conversation, state }),
+            body: JSON.stringify({ channel: nextChannel.id, personaId, conversation, state }),
           });
           if (!response.ok) throw new Error(`channel failed ${response.status}`);
           await applyRadioResult(await response.json(), `切到${nextChannel.label}`);
@@ -727,11 +762,18 @@
       document.querySelectorAll(".chip").forEach((item, index) => {
         item.addEventListener("click", () => tuneChannel(libraryChannels[index]));
       });
+      if (ui.personaSwitch) {
+        ui.personaSwitch.addEventListener("click", (event) => {
+          const option = event.target.closest(".persona-option");
+          if (option) setPersona(option.dataset.personaId);
+        });
+      }
 
       hydrateBackendStatus();
       setCurrentTrack(currentTrack, 0);
       commitVolume(volumeNow);
       renderConversation();
+      syncPersonaSwitch();
       renderSignal();
       markActiveChannel();
       syncRecommendationPanel();

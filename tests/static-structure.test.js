@@ -63,3 +63,16 @@ test("frontend schedule starts from real time and avoids technical DJ status cop
   assert.doesNotMatch(app, /正在生成 DJ 串场/);
   assert.doesNotMatch(app, /月亮 DJ 正在说话/);
 });
+
+test("frontend exposes persistent dj persona selection", () => {
+  const html = fs.readFileSync(webIndexPath, "utf8");
+  const app = fs.readFileSync(webAppPath, "utf8");
+
+  assert.match(html, /id="personaSwitch"/);
+  assert.match(html, /data-persona-id="moonlight"/);
+  assert.match(html, /data-persona-id="luoyonghao-perspective"/);
+  assert.match(app, /moonlight-dj-persona/);
+  assert.match(app, /let personaId = resolvePersonaId\(localStorage\.getItem\(PERSONA_KEY\)\);/);
+  assert.match(app, /personaId,/);
+  assert.match(app, /function setPersona\(nextPersonaId\)/);
+});

@@ -9,6 +9,8 @@ This document records the current frontend playback behavior and the regressions
 - The right panel queue is not just display; clicking a row must select that track and resolve its playback source.
 - Cloud stream playback uses `<audio id="audioPlayer">` directly.
 - External links are only a fallback when the backend cannot provide `stream` or `cli`.
+- DJ persona uses the existing radio APIs. Frontend sends `personaId` in `/api/radio/plan`, `/api/radio/chat`, and `/api/radio/channel`; it does not call a separate persona endpoint.
+- Persona selection is stored in `localStorage` as `moonlight-dj-persona`. The `luoyonghao-perspective` option is a public style reference, not a claim to be the real person.
 
 ## Playback Source Flow
 
@@ -21,6 +23,16 @@ POST /api/radio/chat
   -> result.playback
   -> applyRadioResult()
   -> playCurrent()
+```
+
+Persona flow:
+
+```text
+persona switch click
+  -> localStorage moonlight-dj-persona
+  -> next radio request carries personaId
+  -> result.dj.persona
+  -> frontend syncs selected persona
 ```
 
 Queue click / previous / next:

@@ -4,6 +4,22 @@ function getRuntimeEnv(config = {}) {
   return config.env || (typeof process !== "undefined" && process.env ? process.env : {});
 }
 
+function buildSystemPrompt(persona) {
+  const personaPrompt = persona && persona.prompt ? persona.prompt : [
+    "你是 Moonlight 私人音乐电台女 DJ，像熟悉的老朋友一样和用户说话。",
+    "回复自然、温柔、克制，不要分条说明。",
+  ].join("\n");
+  return [
+    personaPrompt,
+    "你不是机械歌单生成器。先判断用户意图：普通聊天、解释当前歌、补充状态、换歌单、点歌、避开某类音乐。",
+    "普通聊天或用户明确说别换歌时，不要换队列，shouldChangeQueue=false，intent=chat。",
+    "只有用户想听某类歌、换一批、避开某类歌、切频道或点歌时，才 shouldChangeQueue=true。",
+    "需要换歌时，searchQueries 必须给 3-5 个短中文搜索词，优先保留用户原始中文，不要全部改英文。",
+    "只返回 JSON，不要 Markdown。",
+    "字段：intent, shouldChangeQueue, djText, whyThisSong, moodChannel, strategy, searchQueries, nextTrackQuery, queueIntent, hostQuestion, avoidRules, trackIntro。",
+  ].join("\n");
+}
+
 function normalizePlan(raw, fallbackText, provider, status) {
   const searchQueries = Array.isArray(raw.searchQueries)
     ? raw.searchQueries
@@ -36,12 +52,34 @@ function normalizePlan(raw, fallbackText, provider, status) {
 
 function createMockPlan(input, status = "ready") {
   const text = input.text || "默认播出";
+  const personaId = input.persona && input.persona.id;
   const focus = /工作|专注|代码/.test(text);
   const night = /睡|夜|慢/.test(text);
   const chinese = /中文|熟悉/.test(text);
   const moodChannel = focus ? "深度工作" : night ? "夜间慢放" : chinese ? "温柔中文" : "情绪回温";
   const nextTrackQuery = focus ? "电子 低干扰 专注" : night ? "夜间 慢速 柔和" : chinese ? "中文 温柔 人声" : "安静 低刺激 温柔";
   const wantsNoChange = /别换|不要换|先不换|聊会|聊天|为什么|解释/.test(text);
+
+  if (personaId === "luoyonghao-perspective") {
+    return {
+      provider: "mock",
+      status,
+      djText: wantsNoChange
+        ? `我先说结论：歌不用换。你说的“${text}”我听见了，先把这件事聊明白，这比瞎折腾歌单体面。`
+        : `我先说结论：这组歌得换。你提到“${text}”，那就认真一点，找一组不装、不吵、能把状态接住的歌。`,
+      whyThisSong: `因为你提到“${text}”，这时候音乐要务实一点，别抢戏，也别假装高级。`,
+      moodChannel,
+      strategy: focus ? "保留节奏，减少废动作" : "先判断状态，再认真接歌",
+      nextTrackQuery,
+      queueIntent: wantsNoChange ? "keep" : "continue",
+      intent: wantsNoChange ? "chat" : "replace_queue",
+      shouldChangeQueue: !wantsNoChange,
+      searchQueries: [text, nextTrackQuery].filter(Boolean),
+      hostQuestion: wantsNoChange ? "你继续说，我先不打断。这个事我们把它聊清楚。" : "",
+      avoidRules: [],
+      trackIntro: "我先说结论：这首歌放在这里是合适的。它不靠情绪勒索你，也不靠音量假装有力量，就是认真把这一段接住。",
+    };
+  }
 
   return {
     provider: "mock",
@@ -109,16 +147,7 @@ function createOpenAiProvider(config) {
     name: "openai",
     async plan(input) {
       const model = config.model || env.OPENAI_MODEL || DEFAULT_MODEL;
-      const systemPrompt = [
-        "你是 Moonlight 私人音乐电台女 DJ，像熟悉的老朋友一样和用户说话。",
-        "你不是机械歌单生成器。先判断用户意图：普通聊天、解释当前歌、补充状态、换歌单、点歌、避开某类音乐。",
-        "普通聊天或用户明确说别换歌时，不要换队列，shouldChangeQueue=false，intent=chat。",
-        "只有用户想听某类歌、换一批、避开某类歌、切频道或点歌时，才 shouldChangeQueue=true。",
-        "需要换歌时，searchQueries 必须给 3-5 个短中文搜索词，优先保留用户原始中文，不要全部改英文。",
-        "回复要自然、温柔、克制，不要分条说明。",
-        "只返回 JSON，不要 Markdown。",
-        "字段：intent, shouldChangeQueue, djText, whyThisSong, moodChannel, strategy, searchQueries, nextTrackQuery, queueIntent, hostQuestion, avoidRules, trackIntro。",
-      ].join("\n");
+      const systemPrompt = buildSystemPrompt(input.persona);
       const userPrompt = JSON.stringify({
         userText: input.text,
         currentTrack: input.currentTrack,
@@ -218,6 +247,7 @@ function createAiProvider(config = {}) {
 }
 
 module.exports = {
+  buildSystemPrompt,
   createAiProvider,
   createMockPlan,
   parseJsonOutput,

@@ -6,6 +6,7 @@ const { createAiProvider } = require("../src/providers/ai-provider.js");
 const { createMusicProvider } = require("../src/providers/music-provider.js");
 const { createRadioService } = require("../src/radio-service.js");
 const { loadEnvFile } = require("../src/env.js");
+const { DEFAULT_PERSONA_ID, resolvePersona } = require("../src/dj/personas.js");
 
 async function test(name, fn) {
   try {
@@ -31,6 +32,27 @@ test("mock ai provider returns the radio planning contract", async () => {
   assert.match(plan.whyThisSong, /低刺激|专注|稳定/);
   assert.ok(plan.nextTrackQuery.length > 0);
   assert.equal(plan.queueIntent, "continue");
+});
+
+test("dj persona registry resolves defaults and luoyonghao perspective", () => {
+  assert.equal(DEFAULT_PERSONA_ID, "moonlight");
+  assert.equal(resolvePersona("missing").id, "moonlight");
+  assert.equal(resolvePersona("luoyonghao-perspective").label, "老罗视角");
+  assert.match(resolvePersona("luoyonghao-perspective").prompt, /公开表达风格参考/);
+});
+
+test("mock ai provider adapts copy for luoyonghao persona", async () => {
+  const ai = createAiProvider({ provider: "mock" });
+  const plan = await ai.plan({
+    text: "今天想专注工作，避开太吵的歌",
+    currentTrack: { title: "Monday Night Exhale" },
+    context: { channel: "深度陪伴" },
+    persona: resolvePersona("luoyonghao-perspective"),
+  });
+
+  assert.match(plan.djText, /先说结论|认真/);
+  assert.match(plan.trackIntro, /先说结论/);
+  assert.equal(plan.shouldChangeQueue, true);
 });
 
 test("radio chat can answer conversationally without replacing the queue", async () => {
@@ -267,6 +289,54 @@ test("openai provider can use a custom chat-compatible reverse proxy", async () 
   assert.equal(JSON.parse(requests[0].options.body).model, "claude-sonnet-4.5");
   assert.equal(plan.provider, "openai");
   assert.equal(plan.djText, "真实反代 DJ 文案");
+});
+
+test("openai provider includes persona instructions in chat prompt", async () => {
+  const requests = [];
+  const ai = createAiProvider({
+    provider: "openai",
+    apiKey: "test-key",
+    model: "deepseek-v4-flash",
+    baseUrl: "https://api.example.test",
+    apiStyle: "chat",
+    fetch: async (url, options) => {
+      requests.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                intent: "chat",
+                shouldChangeQueue: false,
+                djText: "我先说结论：歌不用换。",
+                whyThisSong: "先聊清楚。",
+                moodChannel: "私人聊天",
+                strategy: "不换歌",
+                searchQueries: [],
+                nextTrackQuery: "安静",
+                queueIntent: "keep",
+                hostQuestion: "",
+                avoidRules: [],
+                trackIntro: "",
+              }),
+            },
+          }],
+        }),
+      };
+    },
+  });
+
+  await ai.plan({
+    text: "先别换歌",
+    currentTrack: {},
+    context: {},
+    persona: resolvePersona("luoyonghao-perspective"),
+  });
+
+  const body = JSON.parse(requests[0].options.body);
+  assert.match(body.messages[0].content, /老罗视角/);
+  assert.match(body.messages[0].content, /不要声称自己是罗永浩本人/);
 });
 
 test("openai provider includes upstream error body when falling back", async () => {
@@ -689,4 +759,48 @@ test("radio chat returns a conversational dj response with a real queue", async 
   assert.equal(result.conversation.at(-1).role, "dj");
   assert.match(result.conversation.at(-1).text, /很累/);
   assert.equal(result.channel.label, "情绪回温");
+});
+
+test("radio service passes persona to ai and returns persona metadata", async () => {
+  let receivedPersona;
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan(input) {
+        receivedPersona = input.persona;
+        return {
+          provider: "mock",
+          status: "ready",
+          intent: "chat",
+          shouldChangeQueue: false,
+          djText: "我先说结论：歌不用换。",
+          whyThisSong: "先聊清楚。",
+          moodChannel: "私人聊天",
+          strategy: "不换歌",
+          searchQueries: [],
+          queueIntent: "keep",
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        return [];
+      },
+      async getPlaybackSource() {
+        return { mode: "stream", url: "https://audio.example/song.mp3", reason: "playable" };
+      },
+    },
+  });
+
+  const result = await radio.chat({
+    text: "先别换歌",
+    personaId: "luoyonghao-perspective",
+    queue: [{ id: "ncm:old", title: "Old Song", artist: "Old Artist" }],
+  });
+
+  assert.equal(receivedPersona.id, "luoyonghao-perspective");
+  assert.equal(result.dj.persona.id, "luoyonghao-perspective");
+  assert.equal(result.queueChanged, false);
 });

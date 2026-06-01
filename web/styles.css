@@ -672,6 +672,36 @@
       box-shadow: 0 0 18px rgba(30, 215, 96, .38);
     }
 
+    .persona-switch {
+      display: inline-grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4px;
+      width: 100%;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      padding: 4px;
+      margin: 0 0 14px;
+      background: rgba(255,255,255,.035);
+    }
+
+    .persona-option {
+      min-width: 0;
+      border: 0;
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .persona-option.active {
+      color: #061006;
+      background: var(--green);
+    }
+
     .dj-card {
       flex: 1;
       border-radius: 10px;

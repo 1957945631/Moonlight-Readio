@@ -65,6 +65,14 @@ wrangler.jsonc              Cloudflare 非敏感配置
 4. `stream` 交给 `<audio>` 播放；不要用 `externalUrl` 覆盖 `stream`。
 5. `stream` 模式只更新 `<audio>.volume/currentTime`，不要轮询 CLI `/api/music/state`。
 6. `external` 只用于不可站内播放的兜底，不应该出现在可见推荐队列。
+7. DJ persona 通过现有 `/api/radio/plan`、`/api/radio/chat`、`/api/radio/channel` 请求体里的 `personaId` 透传；不要为 persona 新增接口。
+
+DJ persona 约定：
+
+- Registry 在 `src/dj/personas.js`，默认 `moonlight`。
+- 前端选择保存在 `localStorage` 的 `moonlight-dj-persona`。
+- `luoyonghao-perspective` 是公开表达风格参考，不是本人扮演或真实观点声明。
+- 切换 persona 不自动换歌，只影响下一次 DJ 回复或调频请求。
 
 最近修过的回归点：
 

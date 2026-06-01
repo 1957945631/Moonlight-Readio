@@ -4,6 +4,7 @@ const {
   routeMoodInput,
   selectTrack,
 } = require("./moonlight-core.js");
+const { resolvePersona } = require("./dj/personas.js");
 
 const CHANNELS = [
   {
@@ -200,6 +201,7 @@ function createRadioService({ aiProvider, musicProvider }) {
   async function buildPlan(payload = {}, options = {}) {
     const text = String(payload.text || "").trim() || "此时此刻，适合什么。";
     const channel = findChannel(payload.channel || payload.channelId || payload.channelLabel || "");
+    const persona = resolvePersona(payload.personaId);
     const previousState = payload.state && Number.isInteger(payload.state.current)
       ? selectTrack({ ...getInitialState(), ...payload.state }, payload.state.current)
       : getInitialState();
@@ -217,6 +219,7 @@ function createRadioService({ aiProvider, musicProvider }) {
         conversation: Array.isArray(payload.conversation) ? payload.conversation.slice(-8) : [],
         queue: existingQueue.slice(0, 8),
       },
+      persona,
     });
 
     const changeQueue = options.forceQueueChange || shouldChangeQueue(aiPlan, text);
@@ -259,6 +262,12 @@ function createRadioService({ aiProvider, musicProvider }) {
         question: aiPlan.hostQuestion || "",
         strategy: aiPlan.strategy || "",
         trackIntro: aiPlan.trackIntro || "",
+        persona: {
+          id: persona.id,
+          name: persona.name,
+          label: persona.label,
+          tagline: persona.tagline,
+        },
       },
       state,
       ui: {
@@ -307,7 +316,12 @@ function createRadioService({ aiProvider, musicProvider }) {
         };
       }
       const nextState = selectTrack(payload.state || getInitialState(), ((payload.state && payload.state.current) || 0) + 1);
-      return buildPlan({ text: nextState.lastInput || "继续播放", state: nextState, conversation: payload.conversation }, { forceQueueChange: true });
+      return buildPlan({
+        text: nextState.lastInput || "继续播放",
+        state: nextState,
+        conversation: payload.conversation,
+        personaId: payload.personaId,
+      }, { forceQueueChange: true });
     },
   };
 }
