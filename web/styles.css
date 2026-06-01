@@ -673,33 +673,49 @@
     }
 
     .persona-switch {
-      display: inline-grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 4px;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
       width: 100%;
       border: 1px solid var(--line-strong);
       border-radius: 8px;
-      padding: 4px;
+      padding: 8px 10px;
       margin: 0 0 14px;
       background: rgba(255,255,255,.035);
     }
 
-    .persona-option {
+    .persona-switch[hidden] {
+      display: none;
+    }
+
+    .persona-label {
+      color: var(--green);
+      font-family: "Courier New", ui-monospace, monospace;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .persona-select {
       min-width: 0;
-      border: 0;
+      width: 100%;
+      border: 1px solid rgba(255,255,255,.08);
       border-radius: 6px;
-      padding: 8px 10px;
-      color: var(--muted);
-      background: transparent;
+      padding: 7px 9px;
+      color: var(--text);
+      background: #151719;
       cursor: pointer;
       font-size: 13px;
       font-weight: 700;
       line-height: 1.2;
     }
 
-    .persona-option.active {
-      color: #061006;
-      background: var(--green);
+    .persona-select:focus {
+      outline: none;
+      border-color: rgba(30, 215, 96, .55);
+      box-shadow: 0 0 0 2px rgba(30, 215, 96, .16);
     }
 
     .dj-card {

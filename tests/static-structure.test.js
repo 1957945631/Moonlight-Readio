@@ -54,6 +54,10 @@ test("frontend playback guards stream resume and failed track recovery", () => {
   assert.match(app, /const streamUrl = new URL\(playback\.url, location\.href\)\.href;/);
   assert.match(app, /if \(ui\.audio\.src !== streamUrl\) ui\.audio\.src = playback\.url;/);
   assert.match(app, /await skipToNextAfterFailure\(currentTrack,/);
+  assert.doesNotMatch(app, /window\.open\(playback\.url/);
+  assert.match(app, /if \(playback\.mode === "external"\)/);
+  assert.match(app, /await skipToNextAfterFailure\(currentTrack, playback\.reason \|\| "这首不能站内播放"\)/);
+  assert.doesNotMatch(app, /这首需要在网易云外部打开/);
 });
 
 test("frontend schedule starts from real time and avoids technical DJ status copy", () => {
@@ -71,9 +75,15 @@ test("frontend exposes persistent dj persona selection", () => {
   assert.match(html, /id="personaSwitch"/);
   assert.doesNotMatch(html, /data-persona-id="moonlight"/);
   assert.doesNotMatch(html, /data-persona-id="luoyonghao-perspective"/);
+  assert.doesNotMatch(html, /老罗视角/);
   assert.match(app, /moonlight-dj-persona/);
+  assert.match(app, /function normalizePersonaStorageId\(value\)/);
+  assert.match(app, /return id === "luoyonghao-perspective" \? "luoyonghao" : id;/);
   assert.match(app, /status\.dj && status\.dj\.personas/);
-  assert.match(app, /ui\.personaSwitch\.innerHTML = personas\.map/);
+  assert.match(app, /id="personaSelect"/);
+  assert.match(app, /class="persona-select"/);
+  assert.match(app, /ui\.liveStatus\.textContent = `DJ：\$\{getDjName\(\)\}`;/);
+  assert.doesNotMatch(app, /老罗视角/);
   assert.match(app, /personaId,/);
   assert.match(app, /function setPersona\(nextPersonaId\)/);
   assert.equal(fs.existsSync(path.join(root, "src", "dj", "personas.js")), false);

@@ -1,3 +1,3 @@
 module.exports = [
-  require("./luoyonghao-perspective.js"),
+  require("./luoyonghao.js"),
 ];

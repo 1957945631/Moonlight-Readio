@@ -105,13 +105,22 @@
       let lastIntroducedTrackId = "";
       let autoAdvancing = false;
 
-      function resolvePersonaId(value) {
+      function normalizePersonaStorageId(value) {
         const id = String(value || "").trim();
+        return id === "luoyonghao-perspective" ? "luoyonghao" : id;
+      }
+
+      function resolvePersonaId(value) {
+        const id = normalizePersonaStorageId(value);
         return personas.some((persona) => persona.id === id) ? id : "";
       }
 
       function getDjName() {
         return currentPersona && currentPersona.name ? currentPersona.name : "月亮 DJ";
+      }
+
+      function renderDjStatus() {
+        ui.liveStatus.textContent = `DJ：${getDjName()}`;
       }
 
       function normalizeTrack(track, index) {
@@ -144,7 +153,7 @@
       function statusText(mode) {
         if (mode === "cli") return "网易云 CLI 播放";
         if (mode === "stream" || mode === "audio") return "真实音频";
-        if (mode === "external") return "外部打开";
+        if (mode === "external") return "不可站内播放";
         if (mode === "unavailable") return "无播放权限";
         return "模拟播放";
       }
@@ -187,8 +196,10 @@
           personas = Array.isArray(status.dj && status.dj.personas) ? status.dj.personas : [];
           personaId = resolvePersonaId(localStorage.getItem(PERSONA_KEY));
           currentPersona = personas.find((persona) => persona.id === personaId) || null;
-          if (!personaId) localStorage.removeItem(PERSONA_KEY);
+          if (personaId) localStorage.setItem(PERSONA_KEY, personaId);
+          else localStorage.removeItem(PERSONA_KEY);
           syncPersonaSwitch();
+          renderDjStatus();
           renderConversation();
           setStatuses({
             ai: status.ai.provider === "openai" && status.ai.configured ? "AI 已连接" : "AI 模拟中",
@@ -203,7 +214,7 @@
         if (track.playbackSource && track.playbackSource.mode) return track.playbackSource;
         if (track.originalId && track.encryptedId) return { ...track, mode: "cli", reason: "网易云 CLI 将通过项目内 mpv 播放" };
         if (track.audioUrl) return { mode: "stream", url: track.audioUrl, reason: "本地授权音频" };
-        if (track.externalUrl) return { mode: "external", url: track.externalUrl, reason: "这首需要在网易云外部打开" };
+        if (track.externalUrl) return { mode: "external", url: track.externalUrl, reason: "这首不能站内播放" };
         return { mode: "unavailable", reason: "当前没有可播放音源" };
       }
 
@@ -228,6 +239,13 @@
               track.playbackSource = source;
               if (source && source.mode) {
                 setStatuses({ playback: statusText(source.mode) });
+                if (!["cli", "stream"].includes(source.mode)) {
+                  return {
+                    mode: source.mode === "external" ? "external" : "unavailable",
+                    url: source.url || "",
+                    reason: source.reason || (source.mode === "external" ? "这首不能站内播放" : "当前没有可播放音源"),
+                  };
+                }
                 return source;
               }
             }
@@ -251,6 +269,7 @@
         ui.duration.textContent = currentTrack.duration || formatTime(total);
         ui.progressBar.style.width = `${clamp((elapsedNow / total) * 100, 0, 100)}%`;
         ui.playBtn.textContent = playingNow ? "Ⅱ" : "▶";
+        renderDjStatus();
         const isLiked = state.likedTitles.includes(currentTrack.title);
         ui.favBtn.textContent = isLiked ? "♥" : "♡";
         ui.favBtn.style.color = isLiked ? "var(--green)" : "var(--text)";
@@ -360,9 +379,14 @@
           return;
         }
         ui.personaSwitch.hidden = false;
-        ui.personaSwitch.innerHTML = personas.map((persona) => `
-          <button class="persona-option ${persona.id === personaId ? "active" : ""}" type="button" data-persona-id="${html(persona.id)}">${html(persona.name)}</button>
-        `).join("");
+        ui.personaSwitch.innerHTML = `
+          <label class="persona-label" for="personaSelect">DJ</label>
+          <select class="persona-select" id="personaSelect" aria-label="选择 DJ">
+            ${personas.map((persona) => `
+              <option value="${html(persona.id)}" ${persona.id === personaId ? "selected" : ""}>${html(persona.name)}</option>
+            `).join("")}
+          </select>
+        `;
       }
 
       function setPersona(nextPersonaId) {
@@ -371,6 +395,7 @@
         if (personaId) localStorage.setItem(PERSONA_KEY, personaId);
         else localStorage.removeItem(PERSONA_KEY);
         syncPersonaSwitch();
+        renderDjStatus();
         renderConversation();
       }
 
@@ -391,9 +416,9 @@
           try {
             const response = await fetch(`${apiBase}/api/music/stop`, { method: "POST" });
             const result = await response.json();
-            ui.liveStatus.textContent = result.reason || "网易云 CLI 已停止播放";
+            setStatuses({ playback: result.reason || "网易云 CLI 已停止播放" });
           } catch {
-            ui.liveStatus.textContent = "网易云 CLI 停止失败";
+            setStatuses({ playback: "网易云 CLI 停止失败" });
           }
         } else {
           ui.audio.pause();
@@ -401,7 +426,7 @@
       }
 
       async function requestReplacementQueueAfterFailure() {
-        ui.liveStatus.textContent = "这首歌单暂时都拿不到音源，我帮你换一组试试。";
+        setStatuses({ playback: "这首歌单暂时都拿不到音源，我帮你换一组试试。" });
         try {
           const response = await fetch(`${apiBase}/api/radio/plan`, {
             method: "POST",
@@ -485,7 +510,7 @@
             });
             const result = await response.json();
             playingNow = Boolean(result.ok);
-            ui.liveStatus.textContent = result.reason || (result.ok ? "网易云 CLI 正在播放" : "网易云 CLI 播放失败");
+            setStatuses({ playback: result.reason || (result.ok ? "网易云 CLI 正在播放" : "网易云 CLI 播放失败") });
             setStatuses({ playback: result.ok ? "网易云 CLI 播放中" : "CLI 播放失败" });
             if (result.ok && volumeNow > 0) {
               fetch(`${apiBase}/api/music/volume`, {
@@ -506,15 +531,18 @@
           renderPlayer();
           return;
         }
-        if (playback.mode === "external" && playback.url) {
-          playingNow = false;
-          window.open(playback.url, "_blank", "noopener");
-          ui.liveStatus.textContent = "这首需要在网易云外部打开";
+        if (playback.mode === "external") {
+          setStatuses({ playback: "外部链接不可站内播放，已跳过" });
+          await skipToNextAfterFailure(currentTrack, playback.reason || "这首不能站内播放");
           renderPlayer();
           return;
         }
         playingNow = false;
-        ui.liveStatus.textContent = playback.reason || "当前没有可播放音源";
+        if (playback.mode === "unavailable") {
+          await skipToNextAfterFailure(currentTrack, playback.reason || "当前没有可播放音源");
+          return;
+        }
+        setStatuses({ playback: playback.reason || "当前没有可播放音源" });
         renderPlayer();
       }
 
@@ -540,7 +568,7 @@
           const nextIndex = currentIndex + 1;
           if (nextIndex >= queue.length) {
             playingNow = false;
-            ui.liveStatus.textContent = "这组歌单已经播完了。你可以继续告诉我现在想听什么，我再给你接一组。";
+            setStatuses({ playback: "这组歌单已经播完了" });
             conversation.push({
               role: "dj",
               text: "这组歌单已经播完了。我先把声音收住，你想继续安静一点，还是换个更有陪伴感的方向？",
@@ -550,7 +578,7 @@
             renderPlayer();
             return;
           }
-          ui.liveStatus.textContent = reason;
+          setStatuses({ playback: reason });
           await selectQueueTrack(nextIndex);
         } finally {
           autoAdvancing = false;
@@ -600,7 +628,7 @@
         if (result.ai && result.ai.status === "fallback") {
           const detail = result.ai.error ? `：${result.ai.error}` : "";
           setStatuses({ ai: result.ai.error ? `AI 失败：${result.ai.error}` : "AI 请求失败，已回退本地规则" });
-          ui.liveStatus.textContent = `AI 临时失败，已用本地 DJ 规则接上${detail}`;
+          setStatuses({ playback: `AI 临时失败，已用本地 DJ 规则接上${detail}` });
           ui.moodCard.textContent = `${ui.moodCard.textContent} AI 本次没有成功返回，页面先用本地规则继续。`;
         }
         renderSignal();
@@ -647,7 +675,7 @@
           conversation.push({ role: "user", text }, { role: "dj", text: "我这边刚刚没接上后端，但我还在。歌先不动，你继续说。" });
           saveConversation();
           setStatuses({ ai: "后端请求失败，本地规则回退" });
-          ui.liveStatus.textContent = `请求后端失败：${error.message || "unknown error"}`;
+          setStatuses({ playback: `请求后端失败：${error.message || "unknown error"}` });
           renderSignal();
           renderConversation();
           renderPlayer();
@@ -661,7 +689,7 @@
       async function tuneChannel(nextChannel) {
         channel = nextChannel;
         markActiveChannel();
-        ui.liveStatus.textContent = `正在切到${nextChannel.label}...`;
+        setStatuses({ playback: `正在切到${nextChannel.label}...` });
         try {
           const response = await fetch(`${apiBase}/api/radio/channel`, {
             method: "POST",
@@ -783,9 +811,8 @@
         item.addEventListener("click", () => tuneChannel(libraryChannels[index]));
       });
       if (ui.personaSwitch) {
-        ui.personaSwitch.addEventListener("click", (event) => {
-          const option = event.target.closest(".persona-option");
-          if (option) setPersona(option.dataset.personaId);
+        ui.personaSwitch.addEventListener("change", (event) => {
+          if (event.target && event.target.id === "personaSelect") setPersona(event.target.value);
         });
       }
 

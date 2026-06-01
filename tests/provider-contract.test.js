@@ -40,6 +40,10 @@ test("dj persona registry loads packages and keeps empty defaults explicit", () 
   assert.equal(loadPersonas(emptyDir).size, 0);
   assert.equal(resolvePersona(loadPersonas(emptyDir), "missing"), null);
 
+  const bundled = loadPersonas();
+  assert.equal(resolvePersona(bundled, "luoyonghao").name, "罗永浩");
+  assert.equal(resolvePersona(bundled, "luoyonghao-perspective"), null);
+
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moonlight-personas-"));
   fs.writeFileSync(path.join(dir, "test-dj.js"), [
     "module.exports = {",
