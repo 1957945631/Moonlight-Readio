@@ -13,11 +13,17 @@ async function test(name, fn) {
 }
 
 test("api handler reports status using env-backed providers", async () => {
+  const personaRegistry = new Map([["test-dj", {
+    id: "test-dj",
+    name: "测试 DJ",
+    description: "测试人格",
+  }]]);
   const services = createApiServices({
     AI_PROVIDER: "mock",
     MUSIC_PROVIDER: "netease",
     NETEASE_API_BASE: "https://api.example.test",
   }, {
+    personaRegistry,
     musicFetch: async (url) => ({
       ok: true,
       json: async () => {
@@ -40,6 +46,11 @@ test("api handler reports status using env-backed providers", async () => {
   assert.equal(body.music.loggedIn, false);
   assert.equal(body.music.supportsSearch, true);
   assert.equal(body.music.supportsPlaybackUrl, false);
+  assert.deepEqual(body.dj.personas, [{
+    id: "test-dj",
+    name: "测试 DJ",
+    description: "测试人格",
+  }]);
 });
 
 test("api handler returns null for non-api routes", async () => {

@@ -1,6 +1,7 @@
 const { createAiProvider } = require("./providers/ai-provider.js");
 const { createMusicProvider } = require("./providers/music-provider.js");
 const { createRadioService } = require("./radio-service.js");
+const { loadPersonas, listPersonas } = require("./dj/persona-registry.js");
 
 function getEnv(env, key) {
   if (env && Object.prototype.hasOwnProperty.call(env, key)) return env[key];
@@ -19,11 +20,13 @@ function createApiServices(env = {}, options = {}) {
     provider: getEnv(env, "MUSIC_PROVIDER") || "netease",
     fetch: options.musicFetch,
   });
+  const personaRegistry = options.personaRegistry || loadPersonas(options.personaDir);
   return {
     env,
     aiProvider,
     musicProvider,
-    radio: createRadioService({ aiProvider, musicProvider }),
+    personaRegistry,
+    radio: createRadioService({ aiProvider, musicProvider, personaRegistry }),
   };
 }
 
@@ -50,7 +53,7 @@ async function handleApiRequest(request, services) {
   if (!url.pathname.startsWith("/api/")) return null;
   if (request.method === "OPTIONS") return sendJson(204, {});
 
-  const { env, aiProvider, musicProvider, radio } = services;
+  const { env, aiProvider, musicProvider, personaRegistry, radio } = services;
   try {
     if (request.method === "GET" && url.pathname === "/api/status") {
       const musicStatus = typeof musicProvider.checkStatus === "function"
@@ -71,6 +74,9 @@ async function handleApiRequest(request, services) {
           supportsSearch: musicStatus.supportsSearch,
           supportsPlaybackUrl: musicStatus.supportsPlaybackUrl,
           message: musicStatus.message,
+        },
+        dj: {
+          personas: listPersonas(personaRegistry),
         },
       });
     }

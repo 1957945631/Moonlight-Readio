@@ -53,10 +53,7 @@
       ];
       const BLOCKED_TRACKS_KEY = "moonlight-blocked-tracks";
       const PERSONA_KEY = "moonlight-dj-persona";
-      const personas = [
-        { id: "moonlight", label: "月亮 DJ" },
-        { id: "luoyonghao-perspective", label: "老罗视角" },
-      ];
+      let personas = [];
       const libraryChannels = [
         { id: "private", label: "私人 DJ" },
         { id: "breathe", label: "低速呼吸" },
@@ -103,13 +100,18 @@
       let conversation = [];
       let recentTrackIds = JSON.parse(localStorage.getItem("moonlight-recent-tracks") || "[]");
       let blockedTrackIds = JSON.parse(localStorage.getItem(BLOCKED_TRACKS_KEY) || "[]");
-      let personaId = resolvePersonaId(localStorage.getItem(PERSONA_KEY));
+      let personaId = "";
+      let currentPersona = null;
       let lastIntroducedTrackId = "";
       let autoAdvancing = false;
 
       function resolvePersonaId(value) {
         const id = String(value || "").trim();
-        return personas.some((persona) => persona.id === id) ? id : "moonlight";
+        return personas.some((persona) => persona.id === id) ? id : "";
+      }
+
+      function getDjName() {
+        return currentPersona && currentPersona.name ? currentPersona.name : "月亮 DJ";
       }
 
       function normalizeTrack(track, index) {
@@ -182,6 +184,12 @@
           } else if (status.music.provider === "netease") {
             musicText = describeNeteaseStatus(status.music);
           }
+          personas = Array.isArray(status.dj && status.dj.personas) ? status.dj.personas : [];
+          personaId = resolvePersonaId(localStorage.getItem(PERSONA_KEY));
+          currentPersona = personas.find((persona) => persona.id === personaId) || null;
+          if (!personaId) localStorage.removeItem(PERSONA_KEY);
+          syncPersonaSwitch();
+          renderConversation();
           setStatuses({
             ai: status.ai.provider === "openai" && status.ai.configured ? "AI 已连接" : "AI 模拟中",
             music: musicText,
@@ -282,15 +290,15 @@
       }
 
       function renderConversation() {
-        const persona = personas.find((item) => item.id === personaId) || personas[0];
+        const djName = getDjName();
         const messages = conversation.length ? conversation : [
           { role: "dj", text: "晚上好，我在。你可以直接和我说今天发生了什么、想避开什么声音，或者点左边频道让我先帮你开一段。" },
         ];
         ui.djCard.innerHTML = `
-          <div class="dj-section-label">${html(persona.label)}</div>
+          <div class="dj-section-label">${html(djName)}</div>
           <div class="dj-history">
             ${messages.map((message) => `
-              <p class="dj-message ${message.role === "user" ? "user" : "dj"}">${html(message.role === "user" ? `你：${message.text}` : `${persona.label}：${message.text}`)}</p>
+              <p class="dj-message ${message.role === "user" ? "user" : "dj"}">${html(message.role === "user" ? `你：${message.text}` : `${djName}：${message.text}`)}</p>
             `).join("")}
           </div>
         `;
@@ -346,14 +354,22 @@
 
       function syncPersonaSwitch() {
         if (!ui.personaSwitch) return;
-        ui.personaSwitch.querySelectorAll(".persona-option").forEach((item) => {
-          item.classList.toggle("active", item.dataset.personaId === personaId);
-        });
+        if (!personas.length) {
+          ui.personaSwitch.hidden = true;
+          ui.personaSwitch.innerHTML = "";
+          return;
+        }
+        ui.personaSwitch.hidden = false;
+        ui.personaSwitch.innerHTML = personas.map((persona) => `
+          <button class="persona-option ${persona.id === personaId ? "active" : ""}" type="button" data-persona-id="${html(persona.id)}">${html(persona.name)}</button>
+        `).join("");
       }
 
       function setPersona(nextPersonaId) {
         personaId = resolvePersonaId(nextPersonaId);
-        localStorage.setItem(PERSONA_KEY, personaId);
+        currentPersona = personas.find((persona) => persona.id === personaId) || null;
+        if (personaId) localStorage.setItem(PERSONA_KEY, personaId);
+        else localStorage.removeItem(PERSONA_KEY);
         syncPersonaSwitch();
         renderConversation();
       }
@@ -547,9 +563,13 @@
         channel = result.channel || channel;
         if (result.dj && result.dj.persona && result.dj.persona.id) {
           personaId = resolvePersonaId(result.dj.persona.id);
-          localStorage.setItem(PERSONA_KEY, personaId);
+          currentPersona = personas.find((item) => item.id === personaId) || null;
+          if (personaId) localStorage.setItem(PERSONA_KEY, personaId);
+          else localStorage.removeItem(PERSONA_KEY);
+        } else {
+          currentPersona = personas.find((item) => item.id === personaId) || null;
         }
-        const persona = personas.find((item) => item.id === personaId) || personas[0];
+        const djName = getDjName();
         const queueChanged = Boolean(result.queueChanged);
         if (queueChanged) {
           queue = (Array.isArray(result.queue) && result.queue.length ? result.queue : queue).map(normalizeTrack);
@@ -567,8 +587,8 @@
         saveConversation();
         ui.moodCard.textContent = userText
           ? queueChanged
-            ? `你说：“${userText}”。${persona.label} 已换成一组新的候选。`
-            : `你说：“${userText}”。${persona.label} 先陪你聊，歌单不打断。`
+            ? `你说：“${userText}”。${djName} 已换成一组新的候选。`
+            : `你说：“${userText}”。${djName} 先陪你聊，歌单不打断。`
           : `当前频道：${channel.label || state.signal.channel}`;
         ui.reasonCopy.textContent = state.reason || (result.dj && result.dj.reason) || "";
         ui.nextCopy.textContent = state.next || "我会继续听你的状态调整下一首。";

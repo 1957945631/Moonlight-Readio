@@ -6,7 +6,8 @@ const { createAiProvider } = require("../src/providers/ai-provider.js");
 const { createMusicProvider } = require("../src/providers/music-provider.js");
 const { createRadioService } = require("../src/radio-service.js");
 const { loadEnvFile } = require("../src/env.js");
-const { DEFAULT_PERSONA_ID, resolvePersona } = require("../src/dj/personas.js");
+const { composeSystemPrompt, composeUserPrompt } = require("../src/dj/prompt-composer.js");
+const { loadPersonas, resolvePersona } = require("../src/dj/persona-registry.js");
 
 async function test(name, fn) {
   try {
@@ -34,24 +35,78 @@ test("mock ai provider returns the radio planning contract", async () => {
   assert.equal(plan.queueIntent, "continue");
 });
 
-test("dj persona registry resolves defaults and luoyonghao perspective", () => {
-  assert.equal(DEFAULT_PERSONA_ID, "moonlight");
-  assert.equal(resolvePersona("missing").id, "moonlight");
-  assert.equal(resolvePersona("luoyonghao-perspective").label, "老罗视角");
-  assert.match(resolvePersona("luoyonghao-perspective").prompt, /公开表达风格参考/);
+test("dj persona registry loads packages and keeps empty defaults explicit", () => {
+  const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "moonlight-empty-personas-"));
+  assert.equal(loadPersonas(emptyDir).size, 0);
+  assert.equal(resolvePersona(loadPersonas(emptyDir), "missing"), null);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moonlight-personas-"));
+  fs.writeFileSync(path.join(dir, "test-dj.js"), [
+    "module.exports = {",
+    "  id: 'test-dj',",
+    "  name: '测试 DJ',",
+    "  description: '测试人格',",
+    "  identity: '我是测试 DJ。',",
+    "  expression: '短句，直接。',",
+    "  musicTaste: { keywords: ['华语 独立'], arrangementStyle: '独立、松弛' },",
+    "};",
+  ].join("\n"), "utf8");
+  fs.writeFileSync(path.join(dir, "invalid.js"), "module.exports = { name: 'missing id' };\n", "utf8");
+  fs.writeFileSync(path.join(dir, "broken.js"), "module.exports = ;\n", "utf8");
+  const registry = loadPersonas(dir);
+  assert.equal(registry.size, 1);
+  assert.equal(resolvePersona(registry, "test-dj").name, "测试 DJ");
 });
 
-test("mock ai provider adapts copy for luoyonghao persona", async () => {
+test("prompt composer combines base protocol and persona music taste", () => {
+  const persona = {
+    id: "test-dj",
+    name: "测试 DJ",
+    identity: "我是测试 DJ。",
+    expression: "短句，直接。",
+    examples: [{ user: "有点累", reply: "先把频道压低一点。" }],
+    musicTaste: {
+      philosophy: "真诚。",
+      preferred: ["华语独立"],
+      avoided: ["短视频热歌"],
+      keywords: ["华语 独立"],
+      arrangementStyle: "独立、松弛",
+    },
+  };
+
+  const systemPrompt = composeSystemPrompt(persona);
+  const userPrompt = JSON.parse(composeUserPrompt({ text: "累", persona }));
+
+  assert.match(systemPrompt, /队列控制规则/);
+  assert.match(systemPrompt, /三件事/);
+  assert.match(systemPrompt, /作为一个 AI/);
+  assert.match(systemPrompt, /reply/);
+  assert.match(systemPrompt, /我是测试 DJ/);
+  assert.match(systemPrompt, /华语独立/);
+  assert.deepEqual(userPrompt.musicTaste.keywords, ["华语 独立"]);
+});
+
+test("mock ai provider adapts copy from generic persona data", async () => {
   const ai = createAiProvider({ provider: "mock" });
+  const persona = {
+    id: "test-dj",
+    name: "测试 DJ",
+    expression: "短句，直接。",
+    musicTaste: {
+      keywords: ["华语 独立"],
+      arrangementStyle: "独立、松弛",
+    },
+  };
   const plan = await ai.plan({
     text: "今天想专注工作，避开太吵的歌",
     currentTrack: { title: "Monday Night Exhale" },
     context: { channel: "深度陪伴" },
-    persona: resolvePersona("luoyonghao-perspective"),
+    persona,
   });
 
-  assert.match(plan.djText, /先说结论|认真/);
-  assert.match(plan.trackIntro, /先说结论/);
+  assert.match(plan.reply, /测试 DJ/);
+  assert.deepEqual(plan.searchQueries.slice(-1), ["华语 独立"]);
+  assert.match(plan.djDirection, /独立、松弛/);
   assert.equal(plan.shouldChangeQueue, true);
 });
 
@@ -291,8 +346,15 @@ test("openai provider can use a custom chat-compatible reverse proxy", async () 
   assert.equal(plan.djText, "真实反代 DJ 文案");
 });
 
-test("openai provider includes persona instructions in chat prompt", async () => {
+test("openai provider uses new schema and composed persona prompt", async () => {
   const requests = [];
+  const persona = {
+    id: "test-dj",
+    name: "测试 DJ",
+    identity: "我是测试 DJ。",
+    expression: "短句，直接。",
+    musicTaste: { keywords: ["华语 独立"], arrangementStyle: "独立、松弛" },
+  };
   const ai = createAiProvider({
     provider: "openai",
     apiKey: "test-key",
@@ -307,18 +369,16 @@ test("openai provider includes persona instructions in chat prompt", async () =>
           choices: [{
             message: {
               content: JSON.stringify({
-                intent: "chat",
-                shouldChangeQueue: false,
-                djText: "我先说结论：歌不用换。",
-                whyThisSong: "先聊清楚。",
-                moodChannel: "私人聊天",
-                strategy: "不换歌",
+                reply: "歌不用换。",
+                queueChanged: false,
+                musicIntent: "chat_only",
+                mood: "私人聊天",
+                djDirection: "不换歌",
                 searchQueries: [],
-                nextTrackQuery: "安静",
-                queueIntent: "keep",
                 hostQuestion: "",
                 avoidRules: [],
                 trackIntro: "",
+                persona: "test-dj",
               }),
             },
           }],
@@ -331,12 +391,14 @@ test("openai provider includes persona instructions in chat prompt", async () =>
     text: "先别换歌",
     currentTrack: {},
     context: {},
-    persona: resolvePersona("luoyonghao-perspective"),
+    persona,
   });
 
   const body = JSON.parse(requests[0].options.body);
-  assert.match(body.messages[0].content, /老罗视角/);
-  assert.match(body.messages[0].content, /不要声称自己是罗永浩本人/);
+  assert.match(body.messages[0].content, /我是测试 DJ/);
+  assert.match(body.messages[0].content, /reply/);
+  assert.match(body.messages[0].content, /queueChanged/);
+  assert.match(body.messages[1].content, /华语 独立/);
 });
 
 test("openai provider includes upstream error body when falling back", async () => {
@@ -763,6 +825,12 @@ test("radio chat returns a conversational dj response with a real queue", async 
 
 test("radio service passes persona to ai and returns persona metadata", async () => {
   let receivedPersona;
+  const registry = new Map([["test-dj", {
+    id: "test-dj",
+    name: "测试 DJ",
+    description: "测试人格",
+    musicTaste: { keywords: ["华语 独立"] },
+  }]]);
   const radio = createRadioService({
     aiProvider: {
       name: "mock",
@@ -771,14 +839,13 @@ test("radio service passes persona to ai and returns persona metadata", async ()
         return {
           provider: "mock",
           status: "ready",
-          intent: "chat",
-          shouldChangeQueue: false,
-          djText: "我先说结论：歌不用换。",
+          musicIntent: "chat_only",
+          queueChanged: false,
+          reply: "歌不用换。",
           whyThisSong: "先聊清楚。",
-          moodChannel: "私人聊天",
-          strategy: "不换歌",
+          mood: "私人聊天",
+          djDirection: "不换歌",
           searchQueries: [],
-          queueIntent: "keep",
         };
       },
     },
@@ -792,15 +859,60 @@ test("radio service passes persona to ai and returns persona metadata", async ()
         return { mode: "stream", url: "https://audio.example/song.mp3", reason: "playable" };
       },
     },
+    personaRegistry: registry,
   });
 
   const result = await radio.chat({
     text: "先别换歌",
-    personaId: "luoyonghao-perspective",
+    personaId: "test-dj",
     queue: [{ id: "ncm:old", title: "Old Song", artist: "Old Artist" }],
   });
 
-  assert.equal(receivedPersona.id, "luoyonghao-perspective");
-  assert.equal(result.dj.persona.id, "luoyonghao-perspective");
+  assert.equal(receivedPersona.id, "test-dj");
+  assert.equal(result.dj.persona.id, "test-dj");
+  assert.equal(result.queueChanged, false);
+});
+
+test("radio service falls back to base protocol when persona is missing", async () => {
+  let receivedPersona = "not-called";
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan(input) {
+        receivedPersona = input.persona;
+        return {
+          provider: "mock",
+          status: "ready",
+          musicIntent: "chat_only",
+          queueChanged: false,
+          reply: "我在，歌先不换。",
+          whyThisSong: "先保持当前播放。",
+          mood: "私人聊天",
+          djDirection: "不换歌",
+          searchQueries: [],
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        return [];
+      },
+      async getPlaybackSource() {
+        return { mode: "stream", url: "https://audio.example/song.mp3", reason: "playable" };
+      },
+    },
+    personaRegistry: new Map(),
+  });
+
+  const result = await radio.chat({
+    text: "先别换歌",
+    personaId: "missing",
+    queue: [{ id: "ncm:old", title: "Old Song", artist: "Old Artist" }],
+  });
+
+  assert.equal(receivedPersona, null);
+  assert.equal(result.dj.persona, null);
   assert.equal(result.queueChanged, false);
 });

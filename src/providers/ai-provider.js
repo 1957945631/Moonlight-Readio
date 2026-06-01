@@ -1,26 +1,23 @@
+const { composeSystemPrompt, composeUserPrompt } = require("../dj/prompt-composer.js");
+
 const DEFAULT_MODEL = "gpt-4.1-mini";
 
 function getRuntimeEnv(config = {}) {
   return config.env || (typeof process !== "undefined" && process.env ? process.env : {});
 }
 
-function buildSystemPrompt(persona) {
-  const personaPrompt = persona && persona.prompt ? persona.prompt : [
-    "你是 Moonlight 私人音乐电台女 DJ，像熟悉的老朋友一样和用户说话。",
-    "回复自然、温柔、克制，不要分条说明。",
-  ].join("\n");
-  return [
-    personaPrompt,
-    "你不是机械歌单生成器。先判断用户意图：普通聊天、解释当前歌、补充状态、换歌单、点歌、避开某类音乐。",
-    "普通聊天或用户明确说别换歌时，不要换队列，shouldChangeQueue=false，intent=chat。",
-    "只有用户想听某类歌、换一批、避开某类歌、切频道或点歌时，才 shouldChangeQueue=true。",
-    "需要换歌时，searchQueries 必须给 3-5 个短中文搜索词，优先保留用户原始中文，不要全部改英文。",
-    "只返回 JSON，不要 Markdown。",
-    "字段：intent, shouldChangeQueue, djText, whyThisSong, moodChannel, strategy, searchQueries, nextTrackQuery, queueIntent, hostQuestion, avoidRules, trackIntro。",
-  ].join("\n");
-}
-
 function normalizePlan(raw, fallbackText, provider, status) {
+  const queueChanged = typeof raw.queueChanged === "boolean"
+    ? raw.queueChanged
+    : typeof raw.shouldChangeQueue === "boolean"
+      ? raw.shouldChangeQueue
+      : typeof raw.should_change_queue === "boolean"
+        ? raw.should_change_queue
+        : undefined;
+  const musicIntent = String(raw.musicIntent || raw.music_intent || raw.intent || "refresh_queue");
+  const reply = String(raw.reply || raw.djText || raw.dj_text || `收到：“${fallbackText}”。我会先把声音放轻一点。`);
+  const mood = String(raw.mood || raw.moodChannel || raw.mood_channel || "情绪回温");
+  const djDirection = String(raw.djDirection || raw.dj_direction || raw.strategy || "先放慢，再进入今天");
   const searchQueries = Array.isArray(raw.searchQueries)
     ? raw.searchQueries
     : Array.isArray(raw.search_queries)
@@ -31,73 +28,65 @@ function normalizePlan(raw, fallbackText, provider, status) {
   return {
     provider,
     status,
-    djText: String(raw.djText || raw.dj_text || `收到：“${fallbackText}”。我会先把声音放轻一点。`),
+    reply,
+    djText: reply,
     whyThisSong: String(raw.whyThisSong || raw.why_this_song || "这首更接近低刺激、稳定、不过度煽情的方向。"),
-    moodChannel: String(raw.moodChannel || raw.mood_channel || "情绪回温"),
-    strategy: String(raw.strategy || "先放慢，再进入今天"),
+    mood,
+    moodChannel: mood,
+    djDirection,
+    strategy: djDirection,
     nextTrackQuery: String(raw.nextTrackQuery || raw.next_track_query || fallbackText || "安静 温柔"),
     queueIntent: raw.queueIntent || raw.queue_intent || "continue",
-    intent: raw.intent || "replace_queue",
-    shouldChangeQueue: typeof raw.shouldChangeQueue === "boolean"
-      ? raw.shouldChangeQueue
-      : typeof raw.should_change_queue === "boolean"
-        ? raw.should_change_queue
-        : undefined,
+    musicIntent,
+    intent: musicIntent,
+    queueChanged,
+    shouldChangeQueue: queueChanged,
     searchQueries: searchQueries.map((query) => String(query || "").trim()).filter(Boolean).slice(0, 5),
     hostQuestion: String(raw.hostQuestion || raw.host_question || ""),
     avoidRules: Array.isArray(raw.avoidRules || raw.avoid_rules) ? (raw.avoidRules || raw.avoid_rules) : [],
     trackIntro: String(raw.trackIntro || raw.track_intro || ""),
+    persona: raw.persona || "",
   };
 }
 
 function createMockPlan(input, status = "ready") {
   const text = input.text || "默认播出";
-  const personaId = input.persona && input.persona.id;
+  const persona = input.persona || null;
   const focus = /工作|专注|代码/.test(text);
   const night = /睡|夜|慢/.test(text);
   const chinese = /中文|熟悉/.test(text);
-  const moodChannel = focus ? "深度工作" : night ? "夜间慢放" : chinese ? "温柔中文" : "情绪回温";
-  const nextTrackQuery = focus ? "电子 低干扰 专注" : night ? "夜间 慢速 柔和" : chinese ? "中文 温柔 人声" : "安静 低刺激 温柔";
+  const mood = focus ? "深度工作" : night ? "夜间慢放" : chinese ? "温柔中文" : "情绪回温";
+  const taste = persona && persona.musicTaste ? persona.musicTaste : {};
+  const tasteKeywords = Array.isArray(taste.keywords) ? taste.keywords : [];
+  const nextTrackQuery = tasteKeywords[0] || (focus ? "电子 低干扰 专注" : night ? "夜间 慢速 柔和" : chinese ? "中文 温柔 人声" : "安静 低刺激 温柔");
   const wantsNoChange = /别换|不要换|先不换|聊会|聊天|为什么|解释/.test(text);
-
-  if (personaId === "luoyonghao-perspective") {
-    return {
-      provider: "mock",
-      status,
-      djText: wantsNoChange
-        ? `我先说结论：歌不用换。你说的“${text}”我听见了，先把这件事聊明白，这比瞎折腾歌单体面。`
-        : `我先说结论：这组歌得换。你提到“${text}”，那就认真一点，找一组不装、不吵、能把状态接住的歌。`,
-      whyThisSong: `因为你提到“${text}”，这时候音乐要务实一点，别抢戏，也别假装高级。`,
-      moodChannel,
-      strategy: focus ? "保留节奏，减少废动作" : "先判断状态，再认真接歌",
-      nextTrackQuery,
-      queueIntent: wantsNoChange ? "keep" : "continue",
-      intent: wantsNoChange ? "chat" : "replace_queue",
-      shouldChangeQueue: !wantsNoChange,
-      searchQueries: [text, nextTrackQuery].filter(Boolean),
-      hostQuestion: wantsNoChange ? "你继续说，我先不打断。这个事我们把它聊清楚。" : "",
-      avoidRules: [],
-      trackIntro: "我先说结论：这首歌放在这里是合适的。它不靠情绪勒索你，也不靠音量假装有力量，就是认真把这一段接住。",
-    };
-  }
+  const personaPrefix = persona && persona.name ? `${persona.name}：` : "";
+  const arrangement = taste.arrangementStyle || (focus ? "保留节奏，减少打扰" : "先放慢，再贴近你的状态");
+  const reply = wantsNoChange
+    ? `${personaPrefix}我在听：“${text}”。歌先不换，你慢慢说。`
+    : `${personaPrefix}收到：“${text}”。我会按这个状态重新排一段，先不让音乐抢走注意力。`;
 
   return {
     provider: "mock",
     status,
-    djText: wantsNoChange
-      ? `我在听：“${text}”。歌先不换，你慢慢说。`
-      : `收到：“${text}”。我会按你的状态重新排一段，先不让音乐抢走注意力。`,
+    reply,
+    djText: reply,
     whyThisSong: `因为你提到“${text}”，Moonlight 会优先选择低刺激、情绪稳定、不过度煽情的声音。`,
-    moodChannel,
-    strategy: focus ? "保留节奏，减少打扰" : "先放慢，再贴近你的状态",
+    mood,
+    moodChannel: mood,
+    djDirection: arrangement,
+    strategy: arrangement,
     nextTrackQuery,
     queueIntent: wantsNoChange ? "keep" : "continue",
-    intent: wantsNoChange ? "chat" : "replace_queue",
+    musicIntent: wantsNoChange ? "chat_only" : "refresh_queue",
+    intent: wantsNoChange ? "chat_only" : "refresh_queue",
+    queueChanged: !wantsNoChange,
     shouldChangeQueue: !wantsNoChange,
-    searchQueries: [text, nextTrackQuery].filter(Boolean),
+    searchQueries: [text, nextTrackQuery, ...tasteKeywords].filter(Boolean).slice(0, 5),
     hostQuestion: wantsNoChange ? "想继续聊刚才那件事，还是我轻轻陪你听着？" : "",
     avoidRules: [],
     trackIntro: "",
+    persona: persona ? persona.id : "",
   };
 }
 
@@ -147,12 +136,8 @@ function createOpenAiProvider(config) {
     name: "openai",
     async plan(input) {
       const model = config.model || env.OPENAI_MODEL || DEFAULT_MODEL;
-      const systemPrompt = buildSystemPrompt(input.persona);
-      const userPrompt = JSON.stringify({
-        userText: input.text,
-        currentTrack: input.currentTrack,
-        context: input.context,
-      });
+      const systemPrompt = composeSystemPrompt(input.persona);
+      const userPrompt = composeUserPrompt(input);
       const responsesPayload = {
         model: config.model || env.OPENAI_MODEL || DEFAULT_MODEL,
         input: [
@@ -172,20 +157,18 @@ function createOpenAiProvider(config) {
             schema: {
               type: "object",
               additionalProperties: false,
-              required: ["intent", "shouldChangeQueue", "djText", "whyThisSong", "moodChannel", "strategy", "searchQueries", "nextTrackQuery", "queueIntent", "hostQuestion", "avoidRules", "trackIntro"],
+              required: ["reply", "queueChanged", "musicIntent", "mood", "djDirection", "searchQueries", "hostQuestion", "avoidRules", "trackIntro", "persona"],
               properties: {
-                intent: { type: "string" },
-                shouldChangeQueue: { type: "boolean" },
-                djText: { type: "string" },
-                whyThisSong: { type: "string" },
-                moodChannel: { type: "string" },
-                strategy: { type: "string" },
+                reply: { type: "string" },
+                queueChanged: { type: "boolean" },
+                musicIntent: { type: "string" },
+                mood: { type: "string" },
+                djDirection: { type: "string" },
                 searchQueries: { type: "array", items: { type: "string" } },
-                nextTrackQuery: { type: "string" },
-                queueIntent: { type: "string" },
                 hostQuestion: { type: "string" },
                 avoidRules: { type: "array", items: { type: "string" } },
                 trackIntro: { type: "string" },
+                persona: { type: "string" },
               },
             },
           },
@@ -247,7 +230,6 @@ function createAiProvider(config = {}) {
 }
 
 module.exports = {
-  buildSystemPrompt,
   createAiProvider,
   createMockPlan,
   parseJsonOutput,

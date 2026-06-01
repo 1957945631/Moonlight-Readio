@@ -69,9 +69,11 @@ wrangler.jsonc              Cloudflare 非敏感配置
 
 DJ persona 约定：
 
-- Registry 在 `src/dj/personas.js`，默认 `moonlight`。
+- 基础协议在 `src/dj/base-protocol.js`，prompt 拼装在 `src/dj/prompt-composer.js`。
+- Registry 在 `src/dj/persona-registry.js`，启动时扫描 `src/dj/personas/*.js`。
+- `src/dj/personas/` 默认为空；新增 DJ 时只添加标准 persona 文件，不改 provider、radio service 或前端源码。
 - 前端选择保存在 `localStorage` 的 `moonlight-dj-persona`。
-- `luoyonghao-perspective` 是公开表达风格参考，不是本人扮演或真实观点声明。
+- `/api/status` 返回 `dj.personas`，前端据此动态渲染 persona 控件。
 - 切换 persona 不自动换歌，只影响下一次 DJ 回复或调频请求。
 
 最近修过的回归点：

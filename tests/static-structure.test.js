@@ -69,10 +69,12 @@ test("frontend exposes persistent dj persona selection", () => {
   const app = fs.readFileSync(webAppPath, "utf8");
 
   assert.match(html, /id="personaSwitch"/);
-  assert.match(html, /data-persona-id="moonlight"/);
-  assert.match(html, /data-persona-id="luoyonghao-perspective"/);
+  assert.doesNotMatch(html, /data-persona-id="moonlight"/);
+  assert.doesNotMatch(html, /data-persona-id="luoyonghao-perspective"/);
   assert.match(app, /moonlight-dj-persona/);
-  assert.match(app, /let personaId = resolvePersonaId\(localStorage\.getItem\(PERSONA_KEY\)\);/);
+  assert.match(app, /status\.dj && status\.dj\.personas/);
+  assert.match(app, /ui\.personaSwitch\.innerHTML = personas\.map/);
   assert.match(app, /personaId,/);
   assert.match(app, /function setPersona\(nextPersonaId\)/);
+  assert.equal(fs.existsSync(path.join(root, "src", "dj", "personas.js")), false);
 });

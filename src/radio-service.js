@@ -4,7 +4,7 @@ const {
   routeMoodInput,
   selectTrack,
 } = require("./moonlight-core.js");
-const { resolvePersona } = require("./dj/personas.js");
+const { resolvePersona } = require("./dj/persona-registry.js");
 
 const CHANNELS = [
   {
@@ -115,13 +115,14 @@ function inferIntent(text) {
 }
 
 function shouldChangeQueue(aiPlan, text) {
-  const intent = aiPlan.intent || inferIntent(text);
+  const intent = aiPlan.musicIntent || aiPlan.intent || inferIntent(text);
   const inferred = inferIntent(text);
   if (inferred === "replace_queue") return true;
+  if (typeof aiPlan.queueChanged === "boolean") return aiPlan.queueChanged;
   if (typeof aiPlan.shouldChangeQueue === "boolean") return aiPlan.shouldChangeQueue;
-  if (intent === "chat" || intent === "explain_current" || intent === "request_preference") return false;
+  if (intent === "chat" || intent === "chat_only" || intent === "keep_current" || intent === "explain_current" || intent === "request_preference") return false;
   if (aiPlan.queueIntent === "keep") return false;
-  return intent === "replace_queue" || intent === "refine_queue" || intent === "tune" || aiPlan.queueIntent === "replace";
+  return intent === "replace_queue" || intent === "refresh_queue" || intent === "change_channel" || intent === "adjust_mood" || intent === "specific_search" || intent === "refine_queue" || intent === "tune" || aiPlan.queueIntent === "replace";
 }
 
 function normalizeQueries(aiPlan, text, channel) {
@@ -144,10 +145,10 @@ function trackDedupeKey(track) {
   return `${String(track.title || "").trim().toLowerCase()}::${String(track.artist || "").trim().toLowerCase()}`;
 }
 
-function mergeConversation(existing, userText, djText, whyThisSong, options = {}) {
+function mergeConversation(existing, userText, reply, whyThisSong, options = {}) {
   const conversation = Array.isArray(existing) ? existing.slice(-16) : [];
   if (userText) conversation.push({ role: "user", text: userText });
-  let text = djText || "我在。你慢慢说。";
+  let text = reply || "我在。你慢慢说。";
   if (whyThisSong && options.includeReason !== false) {
     text = `${text} 我先放这首，是因为${String(whyThisSong).replace(/^因为/, "")}`;
   }
@@ -159,11 +160,11 @@ function buildState(localState, aiPlan, channel, text) {
   return {
     ...localState,
     signal: {
-      channel: aiPlan.moodChannel || channel.label || localState.signal.channel,
+      channel: aiPlan.mood || aiPlan.moodChannel || channel.label || localState.signal.channel,
       source: text ? "你的输入 + 当前频道 + 网易云候选" : "当前频道 + 网易云候选",
-      strategy: aiPlan.strategy || localState.signal.strategy,
+      strategy: aiPlan.djDirection || aiPlan.strategy || localState.signal.strategy,
     },
-    djLine: aiPlan.djText,
+    djLine: aiPlan.reply || aiPlan.djText,
     reason: aiPlan.whyThisSong,
     next: aiPlan.hostQuestion || `我会继续听你的状态调整下一首。`,
   };
@@ -180,7 +181,7 @@ async function collectQueue({ aiPlan, text, channel, payload, provider }) {
   const seenNames = new Set(normalizeExistingQueue(payload, provider).map(trackDedupeKey));
   const tracks = [];
   for (const query of queries) {
-    const results = await provider.searchTracks(query, aiPlan.moodChannel);
+    const results = await provider.searchTracks(query, aiPlan.mood || aiPlan.moodChannel);
     for (const rawTrack of results || []) {
       const track = enrichTrack(rawTrack, provider, tracks.length);
       const nameKey = trackDedupeKey(track);
@@ -197,11 +198,11 @@ async function collectQueue({ aiPlan, text, channel, payload, provider }) {
   return tracks;
 }
 
-function createRadioService({ aiProvider, musicProvider }) {
+function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
   async function buildPlan(payload = {}, options = {}) {
     const text = String(payload.text || "").trim() || "此时此刻，适合什么。";
     const channel = findChannel(payload.channel || payload.channelId || payload.channelLabel || "");
-    const persona = resolvePersona(payload.personaId);
+    const persona = resolvePersona(personaRegistry, payload.personaId);
     const previousState = payload.state && Number.isInteger(payload.state.current)
       ? selectTrack({ ...getInitialState(), ...payload.state }, payload.state.current)
       : getInitialState();
@@ -229,7 +230,7 @@ function createRadioService({ aiProvider, musicProvider }) {
     const recommendedTrack = queue[0] || enrichTrack(currentTrack, musicProvider, 0);
     const playback = await musicProvider.getPlaybackSource(recommendedTrack.id);
     const state = buildState(localState, aiPlan, channel, text);
-    const conversation = mergeConversation(payload.conversation, payload.text || "", aiPlan.djText, aiPlan.whyThisSong, {
+    const conversation = mergeConversation(payload.conversation, payload.text || "", aiPlan.reply || aiPlan.djText, aiPlan.whyThisSong, {
       includeReason: changeQueue,
     });
 
@@ -248,26 +249,25 @@ function createRadioService({ aiProvider, musicProvider }) {
       track: recommendedTrack,
       queue,
       queueChanged: Boolean(changeQueue),
-      intent: aiPlan.intent || inferIntent(text),
+      intent: aiPlan.musicIntent || aiPlan.intent || inferIntent(text),
       searchQueries: changeQueue ? normalizeQueries(aiPlan, text, channel) : [],
       conversation,
       channel: {
         id: channel.id,
-        label: aiPlan.moodChannel || channel.label,
+        label: aiPlan.mood || aiPlan.moodChannel || channel.label,
         description: channel.description,
       },
       dj: {
-        text: aiPlan.djText,
+        text: aiPlan.reply || aiPlan.djText,
         reason: aiPlan.whyThisSong,
         question: aiPlan.hostQuestion || "",
-        strategy: aiPlan.strategy || "",
+        strategy: aiPlan.djDirection || aiPlan.strategy || "",
         trackIntro: aiPlan.trackIntro || "",
-        persona: {
+        persona: persona ? {
           id: persona.id,
           name: persona.name,
-          label: persona.label,
-          tagline: persona.tagline,
-        },
+          description: persona.description || "",
+        } : null,
       },
       state,
       ui: {
