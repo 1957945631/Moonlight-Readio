@@ -2,6 +2,8 @@
 
 Drop persona files in this directory to make them available at runtime. Each file must export one object:
 
+Cloudflare Workers cannot scan the filesystem at runtime, so deployed personas must also be exported from `index.js`. Local Node development still scans `*.js` files directly.
+
 ```js
 module.exports = {
   id: "luoyonghao",
