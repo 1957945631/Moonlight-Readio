@@ -135,15 +135,24 @@ function normalizeQueries(aiPlan, text, channel) {
   return [...new Set(queries.map((query) => String(query || "").trim()).filter(Boolean))].slice(0, 5);
 }
 
+function personaTasteQueries(persona) {
+  if (!persona || !persona.musicTaste) return [];
+  const taste = persona.musicTaste;
+  const queries = [
+    ...(Array.isArray(taste.keywords) ? taste.keywords : []),
+    ...(Array.isArray(taste.preferred) ? taste.preferred : []),
+    taste.arrangementStyle,
+  ];
+  return [...new Set(queries.map((query) => String(query || "").trim()).filter(Boolean))];
+}
+
 function queriesWithPersonaTaste(aiPlan, text, channel, persona) {
-  const queries = normalizeQueries(aiPlan, text, channel);
-  if (persona && persona.musicTaste && Array.isArray(persona.musicTaste.keywords)) {
-    for (const keyword of persona.musicTaste.keywords) {
-      const query = String(keyword || "").trim();
-      if (query && !queries.includes(query)) queries.push(query);
-    }
-  }
-  return queries;
+  const baseQueries = normalizeQueries(aiPlan, text, channel);
+  const tasteQueries = personaTasteQueries(persona);
+  if (!tasteQueries.length) return baseQueries;
+  const userText = String(text || "").trim();
+  const combinedQueries = userText ? tasteQueries.map((query) => `${userText} ${query}`) : [];
+  return [...new Set([...combinedQueries, ...tasteQueries, ...baseQueries])].slice(0, 8);
 }
 
 function normalizeExistingQueue(payload, provider) {
@@ -179,6 +188,15 @@ function buildState(localState, aiPlan, channel, text) {
     reason: aiPlan.whyThisSong,
     next: aiPlan.hostQuestion || `我会继续听你的状态调整下一首。`,
   };
+}
+
+function resolveFinalIntent(aiPlan, text, changeQueue) {
+  const aiIntent = aiPlan.musicIntent || aiPlan.intent || inferIntent(text);
+  const localIntent = inferIntent(text);
+  if (changeQueue && (aiIntent === "chat" || aiIntent === "chat_only" || aiIntent === "keep_current")) {
+    return localIntent === "replace_queue" ? "refresh_queue" : "refresh_queue";
+  }
+  return aiIntent;
 }
 
 async function collectQueue({ aiPlan, text, channel, payload, provider, persona }) {
@@ -236,6 +254,7 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
 
     const changeQueue = options.forceQueueChange || shouldChangeQueue(aiPlan, text);
     const searchQueries = changeQueue ? queriesWithPersonaTaste(aiPlan, text, channel, persona) : [];
+    const finalIntent = resolveFinalIntent(aiPlan, text, changeQueue);
     const queue = changeQueue
       ? await collectQueue({ aiPlan, text, channel, payload, provider: musicProvider, persona })
       : (existingQueue.length ? existingQueue : [enrichTrack(currentTrack, musicProvider, 0)]);
@@ -261,7 +280,7 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
       track: recommendedTrack,
       queue,
       queueChanged: Boolean(changeQueue),
-      intent: aiPlan.musicIntent || aiPlan.intent || inferIntent(text),
+      intent: finalIntent,
       searchQueries,
       conversation,
       channel: {
@@ -345,4 +364,6 @@ module.exports = {
   inferIntent,
   normalizeQueries,
   queriesWithPersonaTaste,
+  personaTasteQueries,
+  resolveFinalIntent,
 };

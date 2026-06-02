@@ -65,9 +65,7 @@ function createMockPlan(input, status = "ready") {
   const personaPrefix = persona && persona.name ? `${persona.name}：` : "";
   const arrangement = taste.arrangementStyle || (focus ? "保留节奏，减少打扰" : "先放慢，再贴近你的状态");
   const exampleReply = findExampleReply(persona, text);
-  const baseReply = exampleReply || (wantsNoChange
-    ? `我在听：“${text}”。歌先不换，你慢慢说。`
-    : `收到：“${text}”。我会按这个状态重新排一段，先不让音乐抢走注意力。`);
+  const baseReply = exampleReply || buildPersonaFallbackReply(persona, text, wantsNoChange);
   const reply = `${personaPrefix}${baseReply}`;
   const selectorName = persona && persona.name ? persona.name : "Moonlight";
   const tasteReason = taste.philosophy || taste.arrangementStyle || "低刺激、情绪稳定、不过度煽情的声音";
@@ -88,7 +86,7 @@ function createMockPlan(input, status = "ready") {
     intent: wantsNoChange ? "chat_only" : "refresh_queue",
     queueChanged: !wantsNoChange,
     shouldChangeQueue: !wantsNoChange,
-    searchQueries: [text, nextTrackQuery, ...tasteKeywords].filter(Boolean).slice(0, 5),
+    searchQueries: uniqueQueries([text, nextTrackQuery, ...tasteKeywords]).slice(0, 5),
     hostQuestion: wantsNoChange ? "想继续聊刚才那件事，还是我轻轻陪你听着？" : "",
     avoidRules: [],
     trackIntro: "",
@@ -111,6 +109,27 @@ function findExampleReply(persona, text) {
     return hits / chars.length >= 0.6;
   });
   return matched && matched.reply ? String(matched.reply).trim() : "";
+}
+
+function buildPersonaFallbackReply(persona, text, wantsNoChange) {
+  const dna = persona && persona.expressionDNA ? persona.expressionDNA : {};
+  const heuristics = persona && Array.isArray(persona.decisionHeuristics) ? persona.decisionHeuristics : [];
+  const taste = persona && persona.musicTaste ? persona.musicTaste : {};
+  if (persona) {
+    const opening = dna.rhythm || heuristics[0] || dna.tone || "先按这个状态判断";
+    const tasteLine = taste.philosophy || taste.arrangementStyle || dna.vocabulary || "";
+    if (wantsNoChange) {
+      return `${opening}。我在听：“${text}”。歌先不换，先把话说清楚。`;
+    }
+    return `${opening}。收到：“${text}”。${tasteLine ? `这次按“${tasteLine}”来排，` : ""}不先回到通用频道。`;
+  }
+  return wantsNoChange
+    ? `我在听：“${text}”。歌先不换，你慢慢说。`
+    : `收到：“${text}”。我会按这个状态重新排一段，先不让音乐抢走注意力。`;
+}
+
+function uniqueQueries(queries) {
+  return [...new Set(queries.map((query) => String(query || "").trim()).filter(Boolean))];
 }
 
 function extractOutputText(response) {

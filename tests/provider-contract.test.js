@@ -104,9 +104,15 @@ test("prompt composer combines base protocol and persona music taste", () => {
   assert.match(systemPrompt, /体面人框架/);
   assert.match(systemPrompt, /判断原则/);
   assert.match(systemPrompt, /表达 DNA/);
+  assert.match(systemPrompt, /当前 DJ 人格约束/);
+  assert.match(systemPrompt, /reply、trackIntro、djDirection、searchQueries/);
   assert.match(systemPrompt, /硬性要求：生成 searchQueries 时必须优先使用以上偏好风格中的关键词/);
   assert.match(systemPrompt, /华语独立/);
   assert.deepEqual(userPrompt.musicTaste.keywords, ["华语 独立"]);
+  assert.deepEqual(userPrompt.personaStyle.expressionDNA, persona.expressionDNA);
+  assert.deepEqual(userPrompt.personaStyle.mentalModels, persona.mentalModels);
+  assert.deepEqual(userPrompt.personaStyle.decisionHeuristics, persona.decisionHeuristics);
+  assert.deepEqual(userPrompt.personaStyle.examples, persona.examples);
 });
 
 test("mock ai provider adapts copy from generic persona data", async () => {
@@ -200,6 +206,46 @@ test("mock ai provider explains song choice from persona music taste", async () 
   assert.match(plan.whyThisSong, /真诚、有态度/);
   assert.doesNotMatch(plan.whyThisSong, /Moonlight/);
   assert.doesNotMatch(plan.whyThisSong, /低刺激、情绪稳定、不过度煽情/);
+});
+
+test("mock ai provider varies fallback copy by generic persona fields", async () => {
+  const ai = createAiProvider({ provider: "mock" });
+  const directPersona = {
+    id: "direct-dj",
+    name: "直接 DJ",
+    decisionHeuristics: ["先给判断，再解释原因。"],
+    expressionDNA: {
+      rhythm: "先说结论，再落到具体安排。",
+      tone: "直接，少铺垫。",
+      vocabulary: "判断、具体、别绕。",
+    },
+    musicTaste: {
+      philosophy: "好音乐要有判断和骨头。",
+      keywords: ["独立 摇滚"],
+    },
+  };
+  const softPersona = {
+    id: "soft-dj",
+    name: "柔和 DJ",
+    decisionHeuristics: ["先接住情绪，再慢慢解释。"],
+    expressionDNA: {
+      rhythm: "先安放情绪，再轻轻推进。",
+      tone: "柔和，留白。",
+      vocabulary: "安静、缓慢、陪伴。",
+    },
+    musicTaste: {
+      philosophy: "好音乐要轻柔、有空间。",
+      keywords: ["氛围 民谣"],
+    },
+  };
+
+  const direct = await ai.plan({ text: "我想听点新的", persona: directPersona });
+  const soft = await ai.plan({ text: "我想听点新的", persona: softPersona });
+
+  assert.notEqual(direct.reply, soft.reply);
+  assert.match(direct.reply, /先说结论|先给判断|判断/);
+  assert.match(soft.reply, /先接住情绪|安放情绪|柔和/);
+  assert.notDeepEqual(direct.searchQueries, soft.searchQueries);
 });
 
 test("radio chat can answer conversationally without replacing the queue", async () => {
@@ -1010,16 +1056,68 @@ test("radio service injects persona music taste keywords into actual search", as
   });
 
   const result = await radio.chat({
-    text: "换一批",
+    text: "我想听有态度的摇滚，别太温柔",
     personaId: "taste-dj",
   });
 
   assert.deepEqual(searchQueries, [
-    "通用 安静",
+    "我想听有态度的摇滚，别太温柔 华语 独立 摇滚 态度",
+    "我想听有态度的摇滚，别太温柔 中文 民谣 真诚 不煽情",
     "华语 独立 摇滚 态度",
     "中文 民谣 真诚 不煽情",
+    "通用 安静",
   ]);
   assert.deepEqual(result.searchQueries, searchQueries);
+});
+
+test("radio service overrides ai chat_only when local text clearly asks for tuning", async () => {
+  const searchQueries = [];
+  const registry = new Map([["taste-dj", {
+    id: "taste-dj",
+    name: "品味 DJ",
+    musicTaste: {
+      keywords: ["独立 摇滚 态度"],
+    },
+  }]]);
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan() {
+        return {
+          provider: "mock",
+          status: "ready",
+          musicIntent: "chat_only",
+          queueChanged: false,
+          reply: "歌先不换。",
+          whyThisSong: "先保持当前播放。",
+          mood: "私人聊天",
+          djDirection: "不换歌",
+          searchQueries: [],
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks(query) {
+        searchQueries.push(query);
+        return [{ id: `ncm:${searchQueries.length}`, title: "Song", artist: "Artist" }];
+      },
+      async getPlaybackSource() {
+        return { mode: "stream", url: "https://audio.example/song.mp3", reason: "playable" };
+      },
+    },
+    personaRegistry: registry,
+  });
+
+  const result = await radio.chat({
+    text: "我想听有态度的摇滚，别太温柔",
+    personaId: "taste-dj",
+  });
+
+  assert.equal(result.queueChanged, true);
+  assert.notEqual(result.intent, "chat_only");
+  assert.match(result.searchQueries[0], /独立 摇滚 态度/);
 });
 
 test("radio service falls back to base protocol when persona is missing", async () => {

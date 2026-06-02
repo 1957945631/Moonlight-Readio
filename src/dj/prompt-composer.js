@@ -41,11 +41,24 @@ function formatExpressionDna(dna) {
   ].filter(Boolean).join("\n");
 }
 
+function buildPersonaOutputConstraint(persona) {
+  if (!persona) return "";
+  return [
+    "## 当前 DJ 人格约束",
+    "你必须让 reply、trackIntro、djDirection、searchQueries 体现当前 DJ 的人格和音乐审美。",
+    "reply 和 trackIntro 要遵守 identity、expression、expressionDNA、decisionHeuristics 和 examples 的表达规则。",
+    "djDirection 要体现当前 DJ 的判断方式和编排倾向。",
+    "searchQueries 要优先使用当前 DJ 的 musicTaste、preferred、keywords 和 arrangementStyle，不要先回到通用 Moonlight 频道词。",
+    "不要冒充真实人物；只使用 persona 声明的公开风格参考和边界。",
+  ].join("\n");
+}
+
 function composeSystemPrompt(persona) {
   const base = buildBaseProtocol();
   const mentalModels = persona ? formatMentalModels(persona.mentalModels) : "";
   const decisionHeuristics = persona ? formatDecisionHeuristics(persona.decisionHeuristics) : "";
   const expressionDna = persona ? formatExpressionDna(persona.expressionDNA) : "";
+  const personaConstraint = buildPersonaOutputConstraint(persona);
   const personaIntro = persona ? [
     persona.identity ? `## 你的身份\n${persona.identity}` : "",
     persona.expression ? `## 表达风格\n${persona.expression}` : "",
@@ -75,7 +88,7 @@ function composeSystemPrompt(persona) {
     persona.musicTaste.arrangementStyle ? `编排倾向：${persona.musicTaste.arrangementStyle}` : "",
     "**硬性要求：生成 searchQueries 时必须优先使用以上偏好风格中的关键词，至少 2 个搜索词必须来自偏好风格和关键词列表。避开类型中的风格绝对不能出现在 searchQueries 中。**",
   ].filter(Boolean).join("\n") : "";
-  return [personaIntro, base, personaDepth, taste, buildOutputSchema()].filter(Boolean).join("\n\n---\n\n");
+  return [personaIntro, base, personaDepth, taste, personaConstraint, buildOutputSchema()].filter(Boolean).join("\n\n---\n\n");
 }
 
 function composeUserPrompt(input = {}) {
@@ -95,6 +108,18 @@ function composeUserPrompt(input = {}) {
       name: persona.name,
       description: persona.description || "",
     } : null,
+    personaStyle: persona ? {
+      identity: persona.identity || "",
+      expression: persona.expression || "",
+      mentalModels: Array.isArray(persona.mentalModels) ? persona.mentalModels : [],
+      decisionHeuristics: Array.isArray(persona.decisionHeuristics) ? persona.decisionHeuristics : [],
+      expressionDNA: persona.expressionDNA || null,
+      examples: Array.isArray(persona.examples) ? persona.examples : [],
+      catchphrases: persona.catchphrases || "",
+      values: persona.values || "",
+      antiPatterns: persona.antiPatterns || "",
+      taboos: persona.taboos || "",
+    } : null,
     musicTaste,
   });
 }
@@ -106,4 +131,5 @@ module.exports = {
   formatMentalModels,
   formatDecisionHeuristics,
   formatExpressionDna,
+  buildPersonaOutputConstraint,
 };
