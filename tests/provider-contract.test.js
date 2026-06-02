@@ -68,6 +68,19 @@ test("prompt composer combines base protocol and persona music taste", () => {
     name: "测试 DJ",
     identity: "我是测试 DJ。",
     expression: "短句，直接。",
+    mentalModels: [
+      { name: "体面人框架", description: "先判断这事体不体面，再决定怎么说。" },
+    ],
+    decisionHeuristics: [
+      "先判断是否体面，再看是否认真。",
+    ],
+    expressionDNA: {
+      sentenceStyle: "短句为主，结论先行。",
+      tone: "高确定性，少铺垫。",
+      vocabulary: "体面、认真、别装。",
+      rhythm: "先抛核心判断再展开。",
+      humor: "克制自嘲。",
+    },
     examples: [{ user: "有点累", reply: "先把频道压低一点。" }],
     musicTaste: {
       philosophy: "真诚。",
@@ -86,6 +99,12 @@ test("prompt composer combines base protocol and persona music taste", () => {
   assert.match(systemPrompt, /作为一个 AI/);
   assert.match(systemPrompt, /reply/);
   assert.match(systemPrompt, /我是测试 DJ/);
+  assert.ok(systemPrompt.indexOf("## 你的身份") < systemPrompt.indexOf("Moonlight 私人音乐电台的 DJ 操作系统"));
+  assert.match(systemPrompt, /核心思维方式/);
+  assert.match(systemPrompt, /体面人框架/);
+  assert.match(systemPrompt, /判断原则/);
+  assert.match(systemPrompt, /表达 DNA/);
+  assert.match(systemPrompt, /硬性要求：生成 searchQueries 时必须优先使用以上偏好风格中的关键词/);
   assert.match(systemPrompt, /华语独立/);
   assert.deepEqual(userPrompt.musicTaste.keywords, ["华语 独立"]);
 });
@@ -112,6 +131,75 @@ test("mock ai provider adapts copy from generic persona data", async () => {
   assert.deepEqual(plan.searchQueries.slice(-1), ["华语 独立"]);
   assert.match(plan.djDirection, /独立、松弛/);
   assert.equal(plan.shouldChangeQueue, true);
+});
+
+test("mock ai provider uses persona music taste keywords for search queries", async () => {
+  const ai = createAiProvider({ provider: "mock" });
+  const persona = {
+    id: "taste-dj",
+    name: "品味 DJ",
+    musicTaste: {
+      keywords: [
+        "华语 独立 摇滚 态度",
+        "中文 民谣 真诚 不煽情",
+        "城市 夜晚 独立 华语",
+        "华语 创作 低速 有表达",
+        "独立 民谣 城市",
+      ],
+    },
+  };
+
+  const plan = await ai.plan({ text: "换一批", persona });
+
+  assert.equal(plan.nextTrackQuery, "华语 独立 摇滚 态度 中文 民谣 真诚 不煽情");
+  assert.deepEqual(plan.searchQueries, [
+    "换一批",
+    "华语 独立 摇滚 态度 中文 民谣 真诚 不煽情",
+    "华语 独立 摇滚 态度",
+    "中文 民谣 真诚 不煽情",
+    "城市 夜晚 独立 华语",
+  ]);
+  assert.equal(plan.searchQueries.length, 5);
+});
+
+test("mock ai provider uses persona examples without stiff catchphrase suffixes", async () => {
+  const ai = createAiProvider({ provider: "mock" });
+  const persona = {
+    id: "example-dj",
+    name: "示例 DJ",
+    catchphrases: "认真、体面、底线。",
+    examples: [
+      { user: "有点累", reply: "先说结论，歌不用猛。把频道压低一点。" },
+    ],
+    musicTaste: {
+      keywords: ["华语 独立"],
+    },
+  };
+
+  const plan = await ai.plan({ text: "今天有点累，别太吵", persona });
+
+  assert.match(plan.reply, /先说结论，歌不用猛/);
+  assert.doesNotMatch(plan.reply, /认真。$/);
+});
+
+test("mock ai provider explains song choice from persona music taste", async () => {
+  const ai = createAiProvider({ provider: "mock" });
+  const persona = {
+    id: "taste-dj",
+    name: "品味 DJ",
+    musicTaste: {
+      philosophy: "好音乐要真诚、有态度，不能只有流量感。",
+      arrangementStyle: "有态度的华语独立和民谣为主。",
+      keywords: ["华语 独立"],
+    },
+  };
+
+  const plan = await ai.plan({ text: "我想听摇滚", persona });
+
+  assert.match(plan.whyThisSong, /品味 DJ/);
+  assert.match(plan.whyThisSong, /真诚、有态度/);
+  assert.doesNotMatch(plan.whyThisSong, /Moonlight/);
+  assert.doesNotMatch(plan.whyThisSong, /低刺激、情绪稳定、不过度煽情/);
 });
 
 test("radio chat can answer conversationally without replacing the queue", async () => {
@@ -875,6 +963,63 @@ test("radio service passes persona to ai and returns persona metadata", async ()
   assert.equal(receivedPersona.id, "test-dj");
   assert.equal(result.dj.persona.id, "test-dj");
   assert.equal(result.queueChanged, false);
+});
+
+test("radio service injects persona music taste keywords into actual search", async () => {
+  const searchQueries = [];
+  const registry = new Map([["taste-dj", {
+    id: "taste-dj",
+    name: "品味 DJ",
+    musicTaste: {
+      keywords: ["华语 独立 摇滚 态度", "中文 民谣 真诚 不煽情"],
+    },
+  }]]);
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan(input) {
+        return {
+          provider: "mock",
+          status: "ready",
+          musicIntent: "refresh_queue",
+          queueChanged: true,
+          reply: "换一组。",
+          whyThisSong: "按你的状态重新排。",
+          mood: "私人电台",
+          djDirection: "带一点态度。",
+          searchQueries: ["通用 安静"],
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks(query) {
+        searchQueries.push(query);
+        return [{
+          id: `ncm:${searchQueries.length}`,
+          title: `Song ${searchQueries.length}`,
+          artist: "Artist",
+        }];
+      },
+      async getPlaybackSource() {
+        return { mode: "stream", url: "https://audio.example/song.mp3", reason: "playable" };
+      },
+    },
+    personaRegistry: registry,
+  });
+
+  const result = await radio.chat({
+    text: "换一批",
+    personaId: "taste-dj",
+  });
+
+  assert.deepEqual(searchQueries, [
+    "通用 安静",
+    "华语 独立 摇滚 态度",
+    "中文 民谣 真诚 不煽情",
+  ]);
+  assert.deepEqual(result.searchQueries, searchQueries);
 });
 
 test("radio service falls back to base protocol when persona is missing", async () => {

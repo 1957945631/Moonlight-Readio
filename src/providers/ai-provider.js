@@ -58,20 +58,26 @@ function createMockPlan(input, status = "ready") {
   const mood = focus ? "深度工作" : night ? "夜间慢放" : chinese ? "温柔中文" : "情绪回温";
   const taste = persona && persona.musicTaste ? persona.musicTaste : {};
   const tasteKeywords = Array.isArray(taste.keywords) ? taste.keywords : [];
-  const nextTrackQuery = tasteKeywords[0] || (focus ? "电子 低干扰 专注" : night ? "夜间 慢速 柔和" : chinese ? "中文 温柔 人声" : "安静 低刺激 温柔");
+  const nextTrackQuery = tasteKeywords.length >= 2
+    ? tasteKeywords.slice(0, 2).join(" ")
+    : tasteKeywords[0] || (focus ? "电子 低干扰 专注" : night ? "夜间 慢速 柔和" : chinese ? "中文 温柔 人声" : "安静 低刺激 温柔");
   const wantsNoChange = /别换|不要换|先不换|聊会|聊天|为什么|解释/.test(text);
   const personaPrefix = persona && persona.name ? `${persona.name}：` : "";
   const arrangement = taste.arrangementStyle || (focus ? "保留节奏，减少打扰" : "先放慢，再贴近你的状态");
-  const reply = wantsNoChange
-    ? `${personaPrefix}我在听：“${text}”。歌先不换，你慢慢说。`
-    : `${personaPrefix}收到：“${text}”。我会按这个状态重新排一段，先不让音乐抢走注意力。`;
+  const exampleReply = findExampleReply(persona, text);
+  const baseReply = exampleReply || (wantsNoChange
+    ? `我在听：“${text}”。歌先不换，你慢慢说。`
+    : `收到：“${text}”。我会按这个状态重新排一段，先不让音乐抢走注意力。`);
+  const reply = `${personaPrefix}${baseReply}`;
+  const selectorName = persona && persona.name ? persona.name : "Moonlight";
+  const tasteReason = taste.philosophy || taste.arrangementStyle || "低刺激、情绪稳定、不过度煽情的声音";
 
   return {
     provider: "mock",
     status,
     reply,
     djText: reply,
-    whyThisSong: `因为你提到“${text}”，Moonlight 会优先选择低刺激、情绪稳定、不过度煽情的声音。`,
+    whyThisSong: `因为你提到“${text}”，${selectorName} 会优先选择${tasteReason}。`,
     mood,
     moodChannel: mood,
     djDirection: arrangement,
@@ -88,6 +94,23 @@ function createMockPlan(input, status = "ready") {
     trackIntro: "",
     persona: persona ? persona.id : "",
   };
+}
+
+function findExampleReply(persona, text) {
+  const examples = persona && Array.isArray(persona.examples) ? persona.examples : [];
+  const value = String(text || "");
+  const matched = examples.find((example) => {
+    const user = String((example && example.user) || "").trim();
+    return user && (value.includes(user) || user.includes(value));
+  }) || examples.find((example) => {
+    const user = String((example && example.user) || "").trim();
+    if (!user) return false;
+    const chars = Array.from(new Set(user.replace(/[，。！？、\s]/g, "")));
+    if (!chars.length) return false;
+    const hits = chars.filter((char) => value.includes(char)).length;
+    return hits / chars.length >= 0.6;
+  });
+  return matched && matched.reply ? String(matched.reply).trim() : "";
 }
 
 function extractOutputText(response) {

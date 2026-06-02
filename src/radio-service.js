@@ -135,6 +135,17 @@ function normalizeQueries(aiPlan, text, channel) {
   return [...new Set(queries.map((query) => String(query || "").trim()).filter(Boolean))].slice(0, 5);
 }
 
+function queriesWithPersonaTaste(aiPlan, text, channel, persona) {
+  const queries = normalizeQueries(aiPlan, text, channel);
+  if (persona && persona.musicTaste && Array.isArray(persona.musicTaste.keywords)) {
+    for (const keyword of persona.musicTaste.keywords) {
+      const query = String(keyword || "").trim();
+      if (query && !queries.includes(query)) queries.push(query);
+    }
+  }
+  return queries;
+}
+
 function normalizeExistingQueue(payload, provider) {
   return (Array.isArray(payload.queue) ? payload.queue : [])
     .filter(Boolean)
@@ -170,8 +181,8 @@ function buildState(localState, aiPlan, channel, text) {
   };
 }
 
-async function collectQueue({ aiPlan, text, channel, payload, provider }) {
-  const queries = normalizeQueries(aiPlan, text, channel);
+async function collectQueue({ aiPlan, text, channel, payload, provider, persona }) {
+  const queries = queriesWithPersonaTaste(aiPlan, text, channel, persona);
   const recent = new Set([
     ...(payload.recentTrackIds || []),
     ...(payload.blockedTrackIds || []),
@@ -224,8 +235,9 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
     });
 
     const changeQueue = options.forceQueueChange || shouldChangeQueue(aiPlan, text);
+    const searchQueries = changeQueue ? queriesWithPersonaTaste(aiPlan, text, channel, persona) : [];
     const queue = changeQueue
-      ? await collectQueue({ aiPlan, text, channel, payload, provider: musicProvider })
+      ? await collectQueue({ aiPlan, text, channel, payload, provider: musicProvider, persona })
       : (existingQueue.length ? existingQueue : [enrichTrack(currentTrack, musicProvider, 0)]);
     const recommendedTrack = queue[0] || enrichTrack(currentTrack, musicProvider, 0);
     const playback = await musicProvider.getPlaybackSource(recommendedTrack.id);
@@ -250,7 +262,7 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
       queue,
       queueChanged: Boolean(changeQueue),
       intent: aiPlan.musicIntent || aiPlan.intent || inferIntent(text),
-      searchQueries: changeQueue ? normalizeQueries(aiPlan, text, channel) : [],
+      searchQueries,
       conversation,
       channel: {
         id: channel.id,
@@ -332,4 +344,5 @@ module.exports = {
   resolveTrackId,
   inferIntent,
   normalizeQueries,
+  queriesWithPersonaTaste,
 };
