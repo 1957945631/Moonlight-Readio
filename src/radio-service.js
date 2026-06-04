@@ -354,7 +354,8 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
       conversation: Array.isArray(payload.conversation) ? payload.conversation.slice(-8) : [],
       queue: queue.slice(0, 8),
     };
-    const finalAiPlan = changeQueue && queue.length
+    const shouldUseExpression = typeof aiProvider.express === "function" && (queue.length || !changeQueue);
+    const finalAiPlan = shouldUseExpression
       ? await buildExpressionPlan({
         aiProvider,
         aiPlan,

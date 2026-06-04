@@ -382,6 +382,78 @@ test("radio chat can answer conversationally without replacing the queue", async
   assert.match(result.conversation.at(-1).text, /歌先不换/);
 });
 
+test("radio chat asks expression stage for conversational replies without replacing the queue", async () => {
+  let searchCalls = 0;
+  let expressionInput = null;
+  const existingQueue = [
+    { id: "ncm:old", title: "Old Song", artist: "Old Artist", originalId: "old", encryptedId: "enc-old" },
+  ];
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan() {
+        return {
+          provider: "mock",
+          status: "ready",
+          intent: "chat_only",
+          musicIntent: "chat_only",
+          shouldChangeQueue: false,
+          queueChanged: false,
+          reply: "Received draft text that should not be shown.",
+          djText: "Received draft text that should not be shown.",
+          moodChannel: "私人聊天",
+          strategy: "只聊天，不换歌",
+          searchQueries: [],
+          queueIntent: "keep",
+        };
+      },
+      async express(input) {
+        expressionInput = input;
+        return {
+          provider: "mock",
+          status: "ready",
+          reply: "我喜欢真诚、有表达的音乐，不是糊弄耳朵的东西。",
+          djText: "我喜欢真诚、有表达的音乐，不是糊弄耳朵的东西。",
+          whyThisSong: "",
+          mood: "私人聊天",
+          moodChannel: "私人聊天",
+          djDirection: "只聊天，不换歌",
+          strategy: "只聊天，不换歌",
+          hostQuestion: "你想按这个方向听几首吗？",
+          trackIntro: "",
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease-cli",
+      authorized: true,
+      async searchTracks() {
+        searchCalls += 1;
+        return [{ id: "ncm:new", title: "New Song", artist: "New Artist" }];
+      },
+      async getPlaybackSource() {
+        return { mode: "cli", reason: "playable" };
+      },
+    },
+  });
+
+  const result = await radio.chat({
+    text: "你喜欢什么音乐",
+    queue: existingQueue,
+    currentTrack: existingQueue[0],
+  });
+
+  assert.equal(searchCalls, 0);
+  assert.ok(expressionInput);
+  assert.equal(expressionInput.plan.musicIntent, "chat_only");
+  assert.equal(expressionInput.queue[0].title, "Old Song");
+  assert.equal(result.queueChanged, false);
+  assert.equal(result.queue[0].title, "Old Song");
+  assert.match(result.dj.text, /真诚、有表达/);
+  assert.doesNotMatch(result.dj.text, /Received draft/);
+  assert.match(result.conversation.at(-1).text, /真诚、有表达/);
+});
+
 test("radio chat searches multiple fresh queries and filters recently played tracks", async () => {
   const queries = [];
   const radio = createRadioService({
