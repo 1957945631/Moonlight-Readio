@@ -104,6 +104,7 @@
       let currentPersona = null;
       let lastIntroducedTrackId = "";
       let autoAdvancing = false;
+      let consecutivePlaybackFailures = 0;
 
       function normalizePersonaStorageId(value) {
         const id = String(value || "").trim();
@@ -462,16 +463,16 @@
       async function skipToNextAfterFailure(failedTrack, reason) {
         playingNow = false;
         blockTrack(failedTrack);
-        const failedTitle = failedTrack && failedTrack.title ? failedTrack.title : "这首歌";
+        consecutivePlaybackFailures += 1;
         if (failedTrack && failedTrack.id) {
           queue = queue.filter((track) => track.id !== failedTrack.id);
         }
-        conversation.push({
-          role: "dj",
-          text: `《${failedTitle}》这首暂时播不了，我把它从这次歌单里拿掉，直接换下一首。`,
-        });
-        saveConversation();
-        renderConversation();
+        setStatuses({ playback: reason || "这首暂时拿不到可播放音源，正在跳过。" });
+        if (consecutivePlaybackFailures === 2) {
+          requestDjAsideForPlaybackFailure(failedTrack, reason).catch((error) => {
+            console.error("Moonlight playback aside request failed", error);
+          });
+        }
 
         if (queue.length) {
           const nextIndex = clamp(currentIndex, 0, queue.length - 1);
@@ -486,6 +487,52 @@
         await requestReplacementQueueAfterFailure();
       }
 
+      async function requestDjAsideForPlaybackFailure(failedTrack, reason) {
+        const failedTitle = failedTrack && failedTrack.title ? failedTrack.title : "刚才那首";
+        const response = await fetch(`${apiBase}/api/radio/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            responseMode: "aside",
+            systemEvent: "playback_failure",
+            text: `${failedTitle}连续没接上。请用一句自然的电台过渡陪用户继续听，不解释技术细节，不主动换歌单。`,
+            channel: channel.id,
+            personaId,
+            conversation,
+            queue,
+            currentTrack: failedTrack || currentTrack,
+            playback: { mode: "unavailable", reason: reason || "播放失败" },
+            recentTrackIds,
+            blockedTrackIds,
+            state: {
+              current: currentIndex,
+              likedTitles: state.likedTitles,
+              lastInput: state.lastInput,
+            },
+          }),
+        });
+        if (!response.ok) throw new Error(`aside failed ${response.status}`);
+        const result = await response.json();
+        if (Array.isArray(result.conversation)) {
+          conversation = result.conversation;
+          saveConversation();
+          renderConversation();
+        }
+        if (result.state) {
+          state = result.state;
+          renderSignal();
+        }
+        if (result.dj && result.dj.persona && result.dj.persona.id) {
+          personaId = resolvePersonaId(result.dj.persona.id);
+          currentPersona = personas.find((item) => item.id === personaId) || null;
+          syncPersonaSwitch();
+          renderDjStatus();
+        }
+        if (result.ui) {
+          setStatuses({ ai: result.ui.statusText, music: result.ui.platformText });
+        }
+      }
+
       async function playCurrent() {
         playback = await resolvePlaybackForTrack(currentTrack, playback);
         setStatuses({ playback: statusText(playback.mode) });
@@ -495,6 +542,7 @@
           ui.audio.volume = volumeNow / 100;
           await ui.audio.play().then(() => {
             playingNow = true;
+            consecutivePlaybackFailures = 0;
             introduceCurrentTrack();
           }).catch(() => {
             return skipToNextAfterFailure(currentTrack, "音频播放失败");
@@ -519,7 +567,10 @@
                 body: JSON.stringify({ volume: volumeNow }),
               }).catch(() => {});
             }
-            if (result.ok) introduceCurrentTrack();
+            if (result.ok) {
+              consecutivePlaybackFailures = 0;
+              introduceCurrentTrack();
+            }
             if (!result.ok) {
               await skipToNextAfterFailure(currentTrack, result.reason || "网易云 CLI 播放失败");
             }

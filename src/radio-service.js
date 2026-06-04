@@ -132,7 +132,7 @@ function normalizeQueries(aiPlan, text, channel) {
       ? [aiPlan.searchQueries]
       : [];
   const queries = explicit.length ? explicit : [aiPlan.nextTrackQuery, /[\u4e00-\u9fff]/.test(text) ? text : "", channel.query];
-  return [...new Set(queries.map((query) => String(query || "").trim()).filter(Boolean))].slice(0, 5);
+  return [...new Set(queries.map((query) => String(query || "").trim()).filter(Boolean))].slice(0, 8);
 }
 
 function personaTasteQueries(persona) {
@@ -152,7 +152,7 @@ function queriesWithPersonaTaste(aiPlan, text, channel, persona) {
   if (!tasteQueries.length) return baseQueries;
   const userText = String(text || "").trim();
   const combinedQueries = userText ? tasteQueries.map((query) => `${userText} ${query}`) : [];
-  return [...new Set([...combinedQueries, ...tasteQueries, ...baseQueries])].slice(0, 8);
+  return [...new Set([...combinedQueries, ...tasteQueries, ...baseQueries])].slice(0, 12);
 }
 
 function normalizeExistingQueue(payload, provider) {
@@ -220,9 +220,9 @@ async function collectQueue({ aiPlan, text, channel, payload, provider, persona 
       seen.add(track.id);
       seenNames.add(nameKey);
       tracks.push(track);
-      if (tracks.length >= 8) break;
+      if (tracks.length >= 15) break;
     }
-    if (tracks.length >= 8) break;
+    if (tracks.length >= 15) break;
   }
   return tracks;
 }
@@ -309,12 +309,94 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
     };
   }
 
+  async function buildAside(payload = {}) {
+      const text = String(payload.text || "").trim() || "刚才有几首歌没有接上，请用一句自然的电台过渡陪用户继续听，不解释技术细节，不主动换歌单。";
+      const channel = findChannel(payload.channel || payload.channelId || payload.channelLabel || "");
+      const persona = resolvePersona(personaRegistry, payload.personaId);
+      const localState = { ...getInitialState(), ...(payload.state || {}) };
+      const existingQueue = normalizeExistingQueue(payload, musicProvider);
+      const currentTrack = enrichTrack(payload.currentTrack || existingQueue[0] || TRACKS[localState.current] || TRACKS[0], musicProvider, 0);
+      const queue = existingQueue.length ? existingQueue : [currentTrack];
+      const playback = payload.playback && payload.playback.mode
+        ? payload.playback
+        : { mode: "unavailable", reason: "上一首播放失败，已交给 DJ 过渡" };
+      const aiPlan = await aiProvider.plan({
+        text,
+        currentTrack,
+        context: {
+          channel: channel.label || localState.signal.channel,
+          source: payload.systemEvent === "playback_failure" ? "系统播放失败事件 + 当前队列" : "系统过渡事件 + 当前队列",
+          strategy: "只生成一句自然过渡文案，不换队列，不解释技术细节，不承诺绕过版权。",
+          likedTitles: localState.likedTitles || [],
+          conversation: Array.isArray(payload.conversation) ? payload.conversation.slice(-8) : [],
+          queue: queue.slice(0, 8),
+          systemEvent: payload.systemEvent || "",
+          responseMode: "aside",
+        },
+        persona,
+      });
+      const reply = aiPlan.reply || aiPlan.djText || "我在，刚才那一下先轻轻带过去，歌单不打断。";
+      const conversation = (Array.isArray(payload.conversation) ? payload.conversation.slice(-17) : []);
+      conversation.push({ role: "dj", text: reply });
+      const state = buildState(localState, {
+        ...aiPlan,
+        musicIntent: "chat_only",
+        intent: "chat_only",
+        queueChanged: false,
+        shouldChangeQueue: false,
+      }, channel, "");
+
+    return {
+      ai: {
+        provider: aiPlan.provider,
+        status: aiPlan.status,
+        error: aiPlan.error || "",
+      },
+      music: {
+        provider: musicProvider.name,
+        authorized: Boolean(musicProvider.authorized),
+      },
+      playback,
+      currentTrack,
+      track: currentTrack,
+      queue,
+      queueChanged: false,
+      intent: "chat_only",
+      searchQueries: [],
+      conversation,
+      channel: {
+        id: channel.id,
+        label: aiPlan.mood || aiPlan.moodChannel || channel.label,
+        description: channel.description,
+      },
+      dj: {
+        text: reply,
+        reason: aiPlan.whyThisSong,
+        question: aiPlan.hostQuestion || "",
+        strategy: aiPlan.djDirection || aiPlan.strategy || "",
+        trackIntro: aiPlan.trackIntro || "",
+        persona: persona ? {
+          id: persona.id,
+          name: persona.name,
+          description: persona.description || "",
+        } : null,
+      },
+      state,
+      ui: {
+        statusText: aiStatusText(aiPlan),
+        platformText: platformText(musicProvider),
+        playbackText: playbackText(playback),
+      },
+    };
+  }
+
   return {
     plan(payload = {}) {
       return buildPlan(payload, { forceQueueChange: true });
     },
 
     chat(payload = {}) {
+      if (payload.responseMode === "aside") return buildAside(payload);
       return buildPlan(payload);
     },
 
