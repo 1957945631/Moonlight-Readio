@@ -164,8 +164,35 @@ test("mock ai provider uses persona music taste keywords for search queries", as
     "华语 独立 摇滚 态度",
     "中文 民谣 真诚 不煽情",
     "城市 夜晚 独立 华语",
+    "华语 创作 低速 有表达",
+    "独立 民谣 城市",
   ]);
-  assert.equal(plan.searchQueries.length, 5);
+  assert.equal(plan.searchQueries.length, 7);
+});
+
+test("mock ai provider does not expose persona expression dna as user copy", async () => {
+  const ai = createAiProvider({ provider: "mock" });
+  const persona = {
+    id: "meta-dj",
+    name: "元指令 DJ",
+    expressionDNA: {
+      rhythm: "先给核心判断，再解释原因，最后落到具体音乐安排。",
+      tone: "高确定性，少铺垫。",
+      vocabulary: "体面、认真、别装。",
+    },
+    musicTaste: {
+      philosophy: "真诚但不煽情",
+      arrangementStyle: "先留空间，再慢慢推进",
+      keywords: ["华语 独立"],
+    },
+  };
+
+  const plan = await ai.plan({ text: "换一组", persona });
+
+  assert.doesNotMatch(plan.reply, /先给核心判断/);
+  assert.doesNotMatch(plan.reply, /高确定性/);
+  assert.doesNotMatch(plan.reply, /体面、认真、别装/);
+  assert.match(plan.reply, /真诚但不煽情|先留空间/);
 });
 
 test("mock ai provider uses persona examples without stiff catchphrase suffixes", async () => {
@@ -653,7 +680,7 @@ test("netease provider normalizes Vercel API search results", async () => {
 
   const tracks = await provider.searchTracks("梁博 日落大道");
 
-  assert.equal(requests[0], "https://api.example.test/search?keywords=%E6%A2%81%E5%8D%9A%20%E6%97%A5%E8%90%BD%E5%A4%A7%E9%81%93&type=1&limit=8");
+  assert.equal(requests[0], "https://api.example.test/search?keywords=%E6%A2%81%E5%8D%9A%20%E6%97%A5%E8%90%BD%E5%A4%A7%E9%81%93&type=1&limit=20");
   assert.deepEqual(tracks, [{
     id: "ncm:36392029",
     title: "日落大道",
@@ -1068,6 +1095,157 @@ test("radio service injects persona music taste keywords into actual search", as
     "通用 安静",
   ]);
   assert.deepEqual(result.searchQueries, searchQueries);
+});
+
+test("radio service aside mode appends persona reply without changing queue", async () => {
+  const queue = [
+    { id: "ncm:old-1", title: "Old Song 1", artist: "Old Artist" },
+    { id: "ncm:old-2", title: "Old Song 2", artist: "Old Artist" },
+  ];
+  const registry = new Map([["late-night", {
+    id: "late-night",
+    name: "夜间 DJ",
+    description: "低声过渡",
+  }]]);
+  let receivedInput;
+  let playbackCalls = 0;
+  let searchCalls = 0;
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan(input) {
+        receivedInput = input;
+        return {
+          provider: "mock",
+          status: "ready",
+          musicIntent: "refresh_queue",
+          queueChanged: true,
+          reply: "夜间 DJ：刚才这段没接稳，我把声音轻轻带过去。",
+          whyThisSong: "系统过渡，不重新排歌。",
+          mood: "私人电台",
+          djDirection: "自然过渡",
+          searchQueries: ["不应该搜索"],
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        searchCalls += 1;
+        return [];
+      },
+      async getPlaybackSource() {
+        playbackCalls += 1;
+        return { mode: "stream", url: "https://audio.example/song.mp3", reason: "playable" };
+      },
+    },
+    personaRegistry: registry,
+  });
+
+  const result = await radio.chat({
+    responseMode: "aside",
+    systemEvent: "playback_failure",
+    text: "播放失败过渡",
+    personaId: "late-night",
+    conversation: [{ role: "user", text: "先听着" }],
+    queue,
+    currentTrack: queue[0],
+    playback: { mode: "unavailable", reason: "上一首播放失败" },
+  });
+
+  assert.equal(receivedInput.persona.id, "late-night");
+  assert.equal(result.queueChanged, false);
+  assert.deepEqual(result.queue.map((track) => track.id), ["ncm:old-1", "ncm:old-2"]);
+  assert.equal(result.currentTrack.id, "ncm:old-1");
+  assert.equal(result.playback.reason, "上一首播放失败");
+  assert.equal(result.conversation.at(-1).role, "dj");
+  assert.match(result.conversation.at(-1).text, /没接稳/);
+  assert.equal(playbackCalls, 0);
+  assert.equal(searchCalls, 0);
+});
+
+test("radio service can collect fifteen playable tracks", async () => {
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan() {
+        return {
+          provider: "mock",
+          status: "ready",
+          musicIntent: "refresh_queue",
+          queueChanged: true,
+          reply: "换一组。",
+          whyThisSong: "扩大候选。",
+          mood: "私人电台",
+          djDirection: "多一点选择。",
+          searchQueries: ["候选池"],
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        return Array.from({ length: 20 }, (_, index) => ({
+          id: `ncm:${index + 1}`,
+          title: `Song ${index + 1}`,
+          artist: "Artist",
+        }));
+      },
+      async getPlaybackSource() {
+        return { mode: "stream", url: "https://audio.example/song.mp3", reason: "playable" };
+      },
+    },
+  });
+
+  const result = await radio.chat({ text: "换一组更丰富的" });
+
+  assert.equal(result.queue.length, 15);
+  assert.equal(result.searchQueries.length, 1);
+});
+
+test("radio service visible queue filters out external and unavailable tracks", async () => {
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan() {
+        return {
+          provider: "mock",
+          status: "ready",
+          musicIntent: "refresh_queue",
+          queueChanged: true,
+          reply: "换一组。",
+          whyThisSong: "只保留可播放。",
+          mood: "私人电台",
+          djDirection: "过滤不可播放。",
+          searchQueries: ["混合结果"],
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        return [
+          { id: "ncm:external", title: "External", artist: "Artist" },
+          { id: "ncm:unavailable", title: "Unavailable", artist: "Artist" },
+          { id: "ncm:stream", title: "Stream", artist: "Artist" },
+          { id: "ncm:cli", title: "Cli", artist: "Artist" },
+        ];
+      },
+      async getPlaybackSource(id) {
+        if (id === "ncm:external") return { mode: "external", url: "https://music.example", reason: "external" };
+        if (id === "ncm:unavailable") return { mode: "unavailable", reason: "unavailable" };
+        if (id === "ncm:cli") return { mode: "cli", originalId: "1", encryptedId: "encrypted", reason: "cli" };
+        return { mode: "stream", url: "https://audio.example/song.mp3", reason: "stream" };
+      },
+    },
+  });
+
+  const result = await radio.chat({ text: "换一组可播放的" });
+
+  assert.deepEqual(result.queue.map((track) => track.id), ["ncm:stream", "ncm:cli"]);
 });
 
 test("radio service overrides ai chat_only when local text clearly asks for tuning", async () => {

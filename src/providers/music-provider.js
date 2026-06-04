@@ -225,12 +225,12 @@ function createNeteaseProvider(config = {}) {
     },
     async searchTracks(query, mood) {
       const keyword = query || mood || "月亮";
-      const official = await officialRequest(`/search?keywords=${encodeURIComponent(keyword)}&type=1&limit=8`).catch(() => null);
+      const official = await officialRequest(`/search?keywords=${encodeURIComponent(keyword)}&type=1&limit=20`).catch(() => null);
       const songs = extractSearchSongs(official);
       if (Array.isArray(songs) && songs.length) {
         const tracks = songs.map(normalizeNeteaseApiTrack);
         tracks.forEach((track) => trackCache.set(track.id, track));
-        return tracks.slice(0, 8);
+        return tracks.slice(0, 15);
       }
       const localTracks = await local.searchTracks(keyword);
       return localTracks.map((track) => ({ ...track, sourceLabel: apiBase ? "网易云 API 无匹配" : "网易云外链" }));
@@ -506,7 +506,7 @@ function createNeteaseCliProvider(config = {}) {
       const tracks = parsed === null ? parseTextTracks(result.stdout).map(normalizeCliTrack) : parsed.map(normalizeCliTrack);
       if (tracks.length) {
         tracks.forEach((track) => trackCache.set(track.id, track));
-        return tracks.slice(0, 6);
+        return tracks.slice(0, 15);
       }
 
       const fallback = await local.searchTracks(keyword);

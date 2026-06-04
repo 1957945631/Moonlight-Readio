@@ -41,7 +41,7 @@ function normalizePlan(raw, fallbackText, provider, status) {
     intent: musicIntent,
     queueChanged,
     shouldChangeQueue: queueChanged,
-    searchQueries: searchQueries.map((query) => String(query || "").trim()).filter(Boolean).slice(0, 5),
+    searchQueries: searchQueries.map((query) => String(query || "").trim()).filter(Boolean).slice(0, 8),
     hostQuestion: String(raw.hostQuestion || raw.host_question || ""),
     avoidRules: Array.isArray(raw.avoidRules || raw.avoid_rules) ? (raw.avoidRules || raw.avoid_rules) : [],
     trackIntro: String(raw.trackIntro || raw.track_intro || ""),
@@ -86,7 +86,7 @@ function createMockPlan(input, status = "ready") {
     intent: wantsNoChange ? "chat_only" : "refresh_queue",
     queueChanged: !wantsNoChange,
     shouldChangeQueue: !wantsNoChange,
-    searchQueries: uniqueQueries([text, nextTrackQuery, ...tasteKeywords]).slice(0, 5),
+    searchQueries: uniqueQueries([text, nextTrackQuery, ...tasteKeywords]),
     hostQuestion: wantsNoChange ? "想继续聊刚才那件事，还是我轻轻陪你听着？" : "",
     avoidRules: [],
     trackIntro: "",
@@ -112,12 +112,11 @@ function findExampleReply(persona, text) {
 }
 
 function buildPersonaFallbackReply(persona, text, wantsNoChange) {
-  const dna = persona && persona.expressionDNA ? persona.expressionDNA : {};
   const heuristics = persona && Array.isArray(persona.decisionHeuristics) ? persona.decisionHeuristics : [];
   const taste = persona && persona.musicTaste ? persona.musicTaste : {};
   if (persona) {
-    const opening = dna.rhythm || heuristics[0] || dna.tone || "先按这个状态判断";
-    const tasteLine = taste.philosophy || taste.arrangementStyle || dna.vocabulary || "";
+    const opening = taste.philosophy || taste.arrangementStyle || heuristics[0] || "我先按你的状态接住";
+    const tasteLine = taste.arrangementStyle || taste.philosophy || "";
     if (wantsNoChange) {
       return `${opening}。我在听：“${text}”。歌先不换，先把话说清楚。`;
     }
