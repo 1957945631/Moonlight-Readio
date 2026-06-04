@@ -158,7 +158,8 @@ test("prompt composer splits expression and music prompts by responsibility", ()
 
   assert.match(expressionSystem, /我是拆分 DJ/);
   assert.match(expressionSystem, /表达 DNA/);
-  assert.match(expressionSystem, /queueChanged/);
+  assert.doesNotMatch(expressionSystem, /queueChanged/);
+  assert.match(musicSystem, /queueChanged/);
   assert.doesNotMatch(expressionSystem, /音乐审美/);
   assert.doesNotMatch(expressionSystem, /searchQueries/);
   assert.match(musicSystem, /音乐编排引擎/);
@@ -573,6 +574,74 @@ test("radio service does not fall back to local library when remote search has n
   assert.equal(result.playback.mode, "unavailable");
 });
 
+test("radio service asks the expression stage to write from the final playable queue", async () => {
+  let expressionInput = null;
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan() {
+        return {
+          provider: "mock",
+          status: "ready",
+          intent: "replace_queue",
+          shouldChangeQueue: true,
+          djText: "I will play Wrong Song first.",
+          reply: "I will play Wrong Song first.",
+          whyThisSong: "Wrong Song was the first draft.",
+          moodChannel: "认真深沉",
+          strategy: "继续保持人声和叙事感，不要突然切节奏",
+          searchQueries: ["认真 人声"],
+          queueIntent: "replace",
+          trackIntro: "Wrong Song, from the first draft.",
+        };
+      },
+      async express(input) {
+        expressionInput = input;
+        return {
+          provider: "mock",
+          status: "ready",
+          reply: `Now playing ${input.queue[0].title}, then ${input.queue[1].title}.`,
+          djText: `Now playing ${input.queue[0].title}, then ${input.queue[1].title}.`,
+          whyThisSong: "",
+          mood: input.plan.mood || input.plan.moodChannel,
+          moodChannel: input.plan.mood || input.plan.moodChannel,
+          djDirection: input.plan.djDirection || input.plan.strategy,
+          strategy: input.plan.djDirection || input.plan.strategy,
+          hostQuestion: "",
+          trackIntro: `Intro for ${input.currentTrack.title}.`,
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        return [
+          { id: "ncm:real-1", title: "Real Song", artist: "Real Artist", duration: "3:46" },
+          { id: "ncm:real-2", title: "Second Real Song", artist: "Real Artist", duration: "1:27" },
+        ];
+      },
+      async getPlaybackSource() {
+        return { mode: "stream", url: "https://audio.example/real.mp3", reason: "playable" };
+      },
+    },
+  });
+
+  const result = await radio.chat({ text: "可以那给我推荐一些" });
+
+  assert.ok(expressionInput);
+  assert.equal(expressionInput.queue[0].title, "Real Song");
+  assert.equal(expressionInput.currentTrack.title, "Real Song");
+  assert.equal(expressionInput.plan.reply, "I will play Wrong Song first.");
+  assert.equal(result.currentTrack.title, "Real Song");
+  assert.match(result.dj.text, /Real Song/);
+  assert.doesNotMatch(result.dj.text, /Wrong Song/);
+  assert.match(result.dj.trackIntro, /Real Song/);
+  assert.doesNotMatch(result.dj.trackIntro, /Wrong Song/);
+  assert.match(result.conversation.at(-1).text, /Real Song/);
+  assert.doesNotMatch(result.conversation.at(-1).text, /Wrong Song/);
+});
+
 test("radio chat removes duplicate title and artist results from generated queues", async () => {
   const radio = createRadioService({
     aiProvider: {
@@ -664,15 +733,26 @@ test("openai provider can use a custom chat-compatible reverse proxy", async () 
   const plan = await ai.plan({ text: "累", currentTrack: {}, context: {} });
 
   assert.equal(requests[0].url, "http://16.176.195.43:3000/v1/chat/completions");
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 1);
   assert.equal(JSON.parse(requests[0].options.body).model, "claude-sonnet-4.5");
-  assert.equal(JSON.parse(requests[1].options.body).model, "claude-sonnet-4.5");
+  assert.match(JSON.parse(requests[0].options.body).messages[0].content, /音乐编排引擎/);
   assert.equal(plan.provider, "openai");
-  assert.equal(plan.djText, "真实反代 DJ 文案");
   assert.deepEqual(plan.searchQueries, ["安静 人声"]);
+
+  const expression = await ai.express({
+    text: "累",
+    currentTrack: { title: "安静的歌" },
+    queue: [{ title: "安静的歌" }],
+    context: {},
+    plan,
+  });
+
+  assert.equal(requests.length, 2);
+  assert.equal(JSON.parse(requests[1].options.body).model, "claude-sonnet-4.5");
+  assert.equal(expression.djText, "真实反代 DJ 文案");
 });
 
-test("openai provider uses split prompts and json object chat payloads", async () => {
+test("openai provider separates planning and expression chat payloads", async () => {
   const requests = [];
   const persona = {
     id: "test-dj",
@@ -718,27 +798,36 @@ test("openai provider uses split prompts and json object chat payloads", async (
     },
   });
 
-  await ai.plan({
+  const plan = await ai.plan({
     text: "先别换歌",
     currentTrack: {},
     context: {},
     persona,
   });
+  await ai.express({
+    text: "先别换歌",
+    currentTrack: { title: "Old Song" },
+    queue: [{ title: "Old Song" }],
+    context: {},
+    persona,
+    plan,
+  });
 
-  const body = JSON.parse(requests[0].options.body);
-  const musicBody = JSON.parse(requests[1].options.body);
+  const musicBody = JSON.parse(requests[0].options.body);
+  const expressionBody = JSON.parse(requests[1].options.body);
   assert.equal(requests.length, 2);
-  assert.match(body.messages[0].content, /我是测试 DJ/);
-  assert.match(body.messages[0].content, /reply/);
-  assert.match(body.messages[0].content, /queueChanged/);
-  assert.doesNotMatch(body.messages[0].content, /音乐审美/);
   assert.match(musicBody.messages[0].content, /音乐编排引擎/);
   assert.match(musicBody.messages[0].content, /华语 独立/);
-  assert.deepEqual(body.response_format, { type: "json_object" });
+  assert.match(musicBody.messages[0].content, /queueChanged/);
+  assert.match(expressionBody.messages[0].content, /我是测试 DJ/);
+  assert.match(expressionBody.messages[0].content, /reply/);
+  assert.doesNotMatch(expressionBody.messages[0].content, /queueChanged/);
+  assert.doesNotMatch(expressionBody.messages[0].content, /音乐审美/);
   assert.deepEqual(musicBody.response_format, { type: "json_object" });
+  assert.deepEqual(expressionBody.response_format, { type: "json_object" });
 });
 
-test("openai provider falls back expression and keeps successful music queries", async () => {
+test("openai provider express falls back without discarding successful music queries", async () => {
   const persona = {
     id: "taste-dj",
     name: "品味 DJ",
@@ -778,14 +867,24 @@ test("openai provider falls back expression and keeps successful music queries",
   });
 
   const plan = await ai.plan({ text: "有点累，别太吵", currentTrack: {}, context: {}, persona });
+  const expression = await ai.express({
+    text: "有点累，别太吵",
+    currentTrack: { title: "安静的歌" },
+    queue: [{ title: "安静的歌" }],
+    context: {},
+    persona,
+    plan,
+  });
 
-  assert.equal(plan.status, "fallback");
-  assert.match(plan.reply, /品味 DJ/);
+  assert.equal(plan.status, "ready");
   assert.deepEqual(plan.searchQueries, ["华语 独立", "中文 民谣"]);
-  assert.match(plan.error, /expression/);
+  assert.equal(expression.status, "fallback");
+  assert.match(expression.reply, /品味 DJ/);
+  assert.deepEqual(expression.searchQueries, ["华语 独立", "中文 民谣"]);
+  assert.match(expression.error, /expression/);
 });
 
-test("openai provider keeps expression and falls back music queries to persona taste", async () => {
+test("openai provider falls back music planning queries to persona taste", async () => {
   const persona = {
     id: "taste-dj",
     name: "品味 DJ",
@@ -833,7 +932,6 @@ test("openai provider keeps expression and falls back music queries to persona t
   const plan = await ai.plan({ text: "有点累，别太吵", currentTrack: {}, context: {}, persona });
 
   assert.equal(plan.status, "fallback");
-  assert.equal(plan.reply, "先说结论：别上强刺激。");
   assert.deepEqual(plan.searchQueries, ["华语 独立", "中文 民谣", "真诚、不煽情"]);
   assert.match(plan.error, /music/);
 });

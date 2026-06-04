@@ -143,9 +143,9 @@ function composeExpressionSystemPrompt(persona) {
     persona.examples ? `## 正确示例\n${formatExamples(persona.examples)}` : "",
   ].filter(Boolean).join("\n\n") : "";
   const rules = [
-    "你是 Moonlight 私人音乐电台的 DJ 表达引擎。只负责判断用户意图和写给用户看的 DJ 文案。",
-    "如果用户只是聊天、吐槽、问问题、解释感受，queueChanged 必须为 false。",
-    "只有用户明确要求推荐、换歌、调频、切频道、调整风格或想听某类歌时，queueChanged 才能为 true。",
+    "你是 Moonlight 私人音乐电台的 DJ 表达引擎。只负责根据后端已经解析出的真实可播放队列，写给用户看的 DJ 文案。",
+    "不要自行决定换队列，不要生成新的歌曲名单，不要承诺播放队列里不存在的歌曲。",
+    "如果输入里有 queue，只能提及 queue 里的歌曲；不要提及搜索关键词、草稿歌名或你记忆里的候选歌曲。",
     "不要解释生成过程，不要说“作为一个 AI”“根据算法”“为你生成歌单”。",
   ].join("\n");
   const schema = [
@@ -156,8 +156,6 @@ function composeExpressionSystemPrompt(persona) {
     "hostQuestion: 一句短问题，没有就空字符串。",
     "mood: 当前情绪氛围短词。",
     "djDirection: 给音乐编排用的简短方向。",
-    "queueChanged: 布尔值。",
-    "musicIntent: chat_only | keep_current | refresh_queue | change_channel | adjust_mood | specific_search。",
     "persona: 当前人格 id 或空字符串。",
   ].join("\n");
   return [personaIntro, personaDepth, rules, schema].filter(Boolean).join("\n\n---\n\n");
@@ -179,15 +177,22 @@ function composeMusicSystemPrompt(persona) {
     persona.musicTaste.arrangementStyle ? `编排倾向：${persona.musicTaste.arrangementStyle}` : "",
   ].filter(Boolean).join("\n") : "";
   const rules = [
-    "你是 Moonlight 的音乐编排引擎。只负责生成音乐搜索关键词和避规，不写 DJ 对话。",
+    "你是 Moonlight 的音乐编排引擎。只负责判断是否需要换队列、生成音乐搜索关键词和避规，不写给用户看的 DJ 对话。",
+    "如果用户只是聊天、吐槽、问问题、解释感受，queueChanged 必须为 false。",
+    "只有用户明确要求推荐、换歌、调频、切频道、调整风格或想听某类歌时，queueChanged 才能为 true。",
     "队列要有情绪曲线：第一首贴合当前状态，后续保持统一审美，不突然跳风格。",
     "深夜、学习、放空场景优先不打断思绪；低落时不要立刻塞励志、燃、开心的歌。",
     "硬性要求：searchQueries 必须优先使用当前 DJ 的偏好风格和关键词，至少 3 个 searchQueries 来自偏好风格、关键词或编排倾向。",
     "避开类型中的风格不能出现在 searchQueries 中。",
+    "不要输出具体推荐文案，不要在 reply 里承诺某一首歌；真实歌名必须等后端搜索后由表达阶段生成。",
   ].join("\n");
   const schema = [
     "## 输出 schema",
     "只返回 JSON，不要 Markdown。",
+    "queueChanged: 布尔值。",
+    "musicIntent: chat_only | keep_current | refresh_queue | change_channel | adjust_mood | specific_search。",
+    "mood: 当前情绪氛围短词。",
+    "djDirection: 给音乐编排用的简短方向。",
     "searchQueries: 字符串数组，给音乐搜索服务使用。",
     "avoidRules: 字符串数组，描述当前应避开的音乐规则。",
   ].join("\n");
@@ -199,6 +204,8 @@ function composeExpressionUserPrompt(input = {}) {
   return JSON.stringify({
     userText: input.text,
     currentTrack: input.currentTrack,
+    queue: Array.isArray(input.queue) ? input.queue : [],
+    plan: input.plan || null,
     context: input.context,
     persona: persona ? {
       id: persona.id,
@@ -229,6 +236,7 @@ function composeMusicUserPrompt(input = {}) {
     context: {
       channel: input.context && input.context.channel,
       likedTitles: input.context && input.context.likedTitles,
+      conversation: input.context && input.context.conversation,
     },
     musicTaste: persona ? {
       philosophy: taste.philosophy || "",

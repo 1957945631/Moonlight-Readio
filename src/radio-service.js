@@ -195,6 +195,68 @@ function mergeConversation(existing, userText, reply, whyThisSong, options = {})
   return conversation.slice(-18);
 }
 
+function formatTrackName(track) {
+  if (!track) return "";
+  const title = String(track.title || "").trim();
+  const artist = String(track.artist || "").trim();
+  if (!title) return "";
+  return artist ? `《${title}》 - ${artist}` : `《${title}》`;
+}
+
+function buildQueueAlignedDjText(aiPlan, queue, userText) {
+  if (!Array.isArray(queue) || !queue.length) return aiPlan.reply || aiPlan.djText;
+  const first = formatTrackName(queue[0]);
+  const next = queue.slice(1, 3).map(formatTrackName).filter(Boolean);
+  const direction = aiPlan.djDirection || aiPlan.strategy || "保持这一组声音的方向";
+  const userLine = userText ? `你说“${userText}”，` : "";
+  const nextLine = next.length ? `后面接 ${next.join("、")}。` : "";
+  return `先说结论：${userLine}这次我按真实可播放队列来接，先放${first}。${nextLine}${direction}。`;
+}
+
+function buildQueueAlignedTrackIntro(track, aiPlan) {
+  const name = formatTrackName(track);
+  if (!name) return aiPlan.trackIntro || "";
+  const direction = aiPlan.djDirection || aiPlan.strategy || "";
+  return direction ? `${name}。这一首先落在“${direction}”这个方向上。` : `${name}。`;
+}
+
+async function buildExpressionPlan({ aiProvider, aiPlan, text, currentTrack, queue, context, persona }) {
+  const fallback = {
+    ...aiPlan,
+    reply: buildQueueAlignedDjText(aiPlan, queue, text),
+    djText: buildQueueAlignedDjText(aiPlan, queue, text),
+    whyThisSong: "",
+    trackIntro: buildQueueAlignedTrackIntro(currentTrack, aiPlan),
+  };
+  if (typeof aiProvider.express !== "function") return fallback;
+  try {
+    const expression = await aiProvider.express({
+      text,
+      currentTrack,
+      queue,
+      context,
+      persona,
+      plan: aiPlan,
+    });
+    return {
+      ...aiPlan,
+      ...expression,
+      searchQueries: aiPlan.searchQueries,
+      avoidRules: aiPlan.avoidRules,
+      queueChanged: aiPlan.queueChanged,
+      shouldChangeQueue: aiPlan.shouldChangeQueue,
+      musicIntent: aiPlan.musicIntent,
+      intent: aiPlan.intent,
+    };
+  } catch (error) {
+    return {
+      ...fallback,
+      status: "fallback",
+      error: error.message,
+    };
+  }
+}
+
 function buildState(localState, aiPlan, channel, text) {
   return {
     ...localState,
@@ -284,16 +346,35 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
     const playback = recommendedTrack
       ? await musicProvider.getPlaybackSource(recommendedTrack.id)
       : { mode: "unavailable", reason: "当前没有真实可播放队列" };
-    const state = buildState(localState, aiPlan, channel, text);
-    const conversation = mergeConversation(payload.conversation, payload.text || "", aiPlan.reply || aiPlan.djText, aiPlan.whyThisSong, {
-      includeReason: changeQueue,
+    const expressionContext = {
+      channel: channel.label || localState.signal.channel,
+      source: localState.signal.source,
+      strategy: localState.signal.strategy,
+      likedTitles: localState.likedTitles || [],
+      conversation: Array.isArray(payload.conversation) ? payload.conversation.slice(-8) : [],
+      queue: queue.slice(0, 8),
+    };
+    const finalAiPlan = changeQueue && queue.length
+      ? await buildExpressionPlan({
+        aiProvider,
+        aiPlan,
+        text,
+        currentTrack: recommendedTrack,
+        queue,
+        context: expressionContext,
+        persona,
+      })
+      : aiPlan;
+    const state = buildState(localState, finalAiPlan, channel, text);
+    const conversation = mergeConversation(payload.conversation, payload.text || "", finalAiPlan.reply || finalAiPlan.djText, finalAiPlan.whyThisSong, {
+      includeReason: changeQueue && !(changeQueue && queue.length),
     });
 
     return {
       ai: {
-        provider: aiPlan.provider,
-        status: aiPlan.status,
-        error: aiPlan.error || "",
+        provider: finalAiPlan.provider || aiPlan.provider,
+        status: finalAiPlan.status || aiPlan.status,
+        error: finalAiPlan.error || aiPlan.error || "",
       },
       music: {
         provider: musicProvider.name,
@@ -309,15 +390,15 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
       conversation,
       channel: {
         id: channel.id,
-        label: aiPlan.mood || aiPlan.moodChannel || channel.label,
+        label: finalAiPlan.mood || finalAiPlan.moodChannel || channel.label,
         description: channel.description,
       },
       dj: {
-        text: aiPlan.reply || aiPlan.djText,
-        reason: aiPlan.whyThisSong,
-        question: aiPlan.hostQuestion || "",
-        strategy: aiPlan.djDirection || aiPlan.strategy || "",
-        trackIntro: aiPlan.trackIntro || "",
+        text: finalAiPlan.reply || finalAiPlan.djText,
+        reason: finalAiPlan.whyThisSong,
+        question: finalAiPlan.hostQuestion || "",
+        strategy: finalAiPlan.djDirection || finalAiPlan.strategy || "",
+        trackIntro: finalAiPlan.trackIntro || "",
         persona: persona ? {
           id: persona.id,
           name: persona.name,

@@ -186,6 +186,42 @@ function createExpressionPayload(input, model) {
   };
 }
 
+function createMockExpression(input, status = "ready") {
+  const plan = input.plan || {};
+  const queue = Array.isArray(input.queue) ? input.queue : [];
+  const currentTrack = input.currentTrack || queue[0] || null;
+  const first = currentTrack && currentTrack.title ? String(currentTrack.title) : "";
+  const next = queue.slice(1, 3).map((track) => track && track.title).filter(Boolean);
+  const persona = input.persona || null;
+  const prefix = persona && persona.name ? `${persona.name}：` : "";
+  const direction = plan.djDirection || plan.strategy || "先贴近你的状态，再保持声音稳定";
+  const reply = first
+    ? `${prefix}先说结论：这次先从《${first}》接上。${next.length ? `后面接《${next.join("》、《")}》。` : ""}${direction}。`
+    : `${prefix}我先把频道稳住，等真实可播放的歌接上来。`;
+  return {
+    provider: plan.provider || "mock",
+    status,
+    reply,
+    djText: reply,
+    whyThisSong: "",
+    mood: plan.mood || plan.moodChannel || "情绪回温",
+    moodChannel: plan.mood || plan.moodChannel || "情绪回温",
+    djDirection: direction,
+    strategy: direction,
+    nextTrackQuery: plan.nextTrackQuery || input.text || "",
+    queueIntent: plan.queueIntent || "continue",
+    musicIntent: plan.musicIntent || plan.intent || "refresh_queue",
+    intent: plan.musicIntent || plan.intent || "refresh_queue",
+    queueChanged: plan.queueChanged,
+    shouldChangeQueue: plan.shouldChangeQueue,
+    searchQueries: Array.isArray(plan.searchQueries) ? plan.searchQueries : [],
+    hostQuestion: "",
+    avoidRules: Array.isArray(plan.avoidRules) ? plan.avoidRules : [],
+    trackIntro: first ? `《${first}》先接上。` : "",
+    persona: persona ? persona.id : "",
+  };
+}
+
 function createMusicPayload(input, model) {
   return {
     model,
@@ -215,20 +251,6 @@ async function requestJsonPlan({ requestFetch, baseUrl, apiKey, payload, label }
   return parseJsonOutput(extractOutputText(data));
 }
 
-function mergeExpressionAndMusicPlan({ expression, music, input, provider, status, error }) {
-  const merged = normalizePlan({
-    ...expression,
-    searchQueries: Array.isArray(music.searchQueries || music.search_queries)
-      ? (music.searchQueries || music.search_queries)
-      : [],
-    avoidRules: Array.isArray(music.avoidRules || music.avoid_rules)
-      ? (music.avoidRules || music.avoid_rules)
-      : [],
-  }, input.text, provider, status);
-  if (error) merged.error = error;
-  return merged;
-}
-
 function createOpenAiProvider(config) {
   const env = getRuntimeEnv(config);
   const apiKey = config.apiKey || env.OPENAI_API_KEY;
@@ -241,6 +263,9 @@ function createOpenAiProvider(config) {
       async plan(input) {
         return createMockPlan(input, "fallback");
       },
+      async express(input) {
+        return createMockExpression(input, "fallback");
+      },
     };
   }
 
@@ -251,57 +276,24 @@ function createOpenAiProvider(config) {
       const systemPrompt = composeSystemPrompt(input.persona);
       const userPrompt = composeUserPrompt(input);
       if (apiStyle === "chat") {
-        const expressionPromise = requestJsonPlan({
-          requestFetch,
-          baseUrl,
-          apiKey,
-          payload: createExpressionPayload(input, model),
-          label: "expression",
-        });
-        const musicPromise = requestJsonPlan({
-          requestFetch,
-          baseUrl,
-          apiKey,
-          payload: createMusicPayload(input, model),
-          label: "music",
-        });
-        const [expressionResult, musicResult] = await Promise.allSettled([expressionPromise, musicPromise]);
-        const errors = [];
-        const expression = expressionResult.status === "fulfilled"
-          ? expressionResult.value
-          : (() => {
-            errors.push(expressionResult.reason && expressionResult.reason.message ? expressionResult.reason.message : "expression failed");
-            const fallbackReply = buildPersonaFallbackReply(input.persona, input.text || "", false);
-            return {
-              reply: input.persona && input.persona.name ? `${input.persona.name}：${fallbackReply}` : fallbackReply,
-              queueChanged: true,
-              musicIntent: "refresh_queue",
-              mood: "情绪回温",
-              djDirection: input.persona && input.persona.musicTaste && input.persona.musicTaste.arrangementStyle
-                ? input.persona.musicTaste.arrangementStyle
-                : "先放慢，再贴近你的状态",
-              hostQuestion: "",
-              trackIntro: "",
-              persona: input.persona ? input.persona.id : "",
-            };
-          })();
-        const music = musicResult.status === "fulfilled"
-          ? musicResult.value
-          : (() => {
-            errors.push(musicResult.reason && musicResult.reason.message ? musicResult.reason.message : "music failed");
-            return {
-              searchQueries: personaMusicFallbackQueries(input.persona, input.text),
-              avoidRules: [],
-            };
-          })();
-        return mergeExpressionAndMusicPlan({
-          expression,
-          music,
-          input,
-          provider: "openai",
-          status: errors.length ? "fallback" : "ready",
-          error: errors.join(" | "),
-        });
+        try {
+          const music = await requestJsonPlan({
+            requestFetch,
+            baseUrl,
+            apiKey,
+            payload: createMusicPayload(input, model),
+            label: "music",
+          });
+          return normalizePlan(music, input.text, "openai", "ready");
+        } catch (error) {
+          const fallback = createMockPlan(input, "fallback");
+          return {
+            ...fallback,
+            searchQueries: personaMusicFallbackQueries(input.persona, input.text),
+            avoidRules: [],
+            error: error.message,
+          };
+        }
       }
       const responsesPayload = {
         model: config.model || env.OPENAI_MODEL || DEFAULT_MODEL,
@@ -364,6 +356,89 @@ function createOpenAiProvider(config) {
         return { ...fallback, error: error.message };
       }
     },
+
+    async express(input) {
+      const model = config.model || env.OPENAI_MODEL || DEFAULT_MODEL;
+      if (apiStyle === "chat") {
+        try {
+          const expression = await requestJsonPlan({
+            requestFetch,
+            baseUrl,
+            apiKey,
+            payload: createExpressionPayload(input, model),
+            label: "expression",
+          });
+          return normalizePlan({
+            ...input.plan,
+            ...expression,
+            searchQueries: input.plan && Array.isArray(input.plan.searchQueries) ? input.plan.searchQueries : [],
+            avoidRules: input.plan && Array.isArray(input.plan.avoidRules) ? input.plan.avoidRules : [],
+          }, input.text, "openai", "ready");
+        } catch (error) {
+          return { ...createMockExpression(input, "fallback"), provider: "openai", error: error.message };
+        }
+      }
+      const responsesPayload = {
+        model: config.model || env.OPENAI_MODEL || DEFAULT_MODEL,
+        input: [
+          {
+            role: "system",
+            content: composeExpressionSystemPrompt(input.persona),
+          },
+          {
+            role: "user",
+            content: composeExpressionUserPrompt(input),
+          },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "moonlight_radio_expression",
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["reply", "mood", "djDirection", "hostQuestion", "trackIntro", "persona"],
+              properties: {
+                reply: { type: "string" },
+                mood: { type: "string" },
+                djDirection: { type: "string" },
+                hostQuestion: { type: "string" },
+                trackIntro: { type: "string" },
+                persona: { type: "string" },
+              },
+            },
+          },
+        },
+      };
+      const endpoint = "/v1/responses";
+      const payload = responsesPayload;
+
+      try {
+        const response = await requestFetch(`${baseUrl}${endpoint}`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "");
+          const details = errorText ? ` ${errorText.slice(0, 300)}` : "";
+          throw new Error(`OpenAI request failed: ${response.status}${details}`);
+        }
+        const data = await response.json();
+        const parsed = parseJsonOutput(extractOutputText(data));
+        return normalizePlan({
+          ...input.plan,
+          ...parsed,
+          searchQueries: input.plan && Array.isArray(input.plan.searchQueries) ? input.plan.searchQueries : [],
+          avoidRules: input.plan && Array.isArray(input.plan.avoidRules) ? input.plan.avoidRules : [],
+        }, input.text, "openai", "ready");
+      } catch (error) {
+        return { ...createMockExpression(input, "fallback"), provider: "openai", error: error.message };
+      }
+    },
   };
 }
 
@@ -377,12 +452,18 @@ function createAiProvider(config = {}) {
       async plan(input) {
         return { ...createMockPlan(input, "fallback"), provider: "domestic" };
       },
+      async express(input) {
+        return { ...createMockExpression(input, "fallback"), provider: "domestic" };
+      },
     };
   }
   return {
     name: "mock",
     async plan(input) {
       return createMockPlan(input);
+    },
+    async express(input) {
+      return createMockExpression(input);
     },
   };
 }
