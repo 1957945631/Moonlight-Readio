@@ -212,6 +212,7 @@
       }
 
       function playbackFromTrack(track) {
+        if (!track) return { mode: "unavailable", reason: "当前没有真实可播放队列" };
         if (track.playbackSource && track.playbackSource.mode) return track.playbackSource;
         if (track.originalId && track.encryptedId) return { ...track, mode: "cli", reason: "网易云 CLI 将通过项目内 mpv 播放" };
         if (track.audioUrl) return { mode: "stream", url: track.audioUrl, reason: "本地授权音频" };
@@ -262,16 +263,17 @@
       }
 
       function renderPlayer() {
-        const total = currentTrack.durationSeconds || secondsFromDuration(currentTrack.duration) || 1;
-        ui.title.textContent = currentTrack.title || "Moonlight";
-        ui.artist.textContent = currentTrack.artist || "Moonlight";
-        ui.channelName.textContent = `${state.signal.channel || channel.label} · ${currentTrack.sourceLabel || "Moonlight"}`;
+        const displayTrack = currentTrack || { title: "等待真实音源", artist: "Moonlight", sourceLabel: "网易云候选", duration: "--", durationSeconds: 1 };
+        const total = displayTrack.durationSeconds || secondsFromDuration(displayTrack.duration) || 1;
+        ui.title.textContent = displayTrack.title || "Moonlight";
+        ui.artist.textContent = displayTrack.artist || "Moonlight";
+        ui.channelName.textContent = `${state.signal.channel || channel.label} · ${displayTrack.sourceLabel || "Moonlight"}`;
         ui.elapsed.textContent = formatTime(elapsedNow);
-        ui.duration.textContent = currentTrack.duration || formatTime(total);
+        ui.duration.textContent = displayTrack.duration || formatTime(total);
         ui.progressBar.style.width = `${clamp((elapsedNow / total) * 100, 0, 100)}%`;
         ui.playBtn.textContent = playingNow ? "Ⅱ" : "▶";
         renderDjStatus();
-        const isLiked = state.likedTitles.includes(currentTrack.title);
+        const isLiked = Boolean(currentTrack && state.likedTitles.includes(currentTrack.title));
         ui.favBtn.textContent = isLiked ? "♥" : "♡";
         ui.favBtn.style.color = isLiked ? "var(--green)" : "var(--text)";
         ui.likedCount.textContent = state.likedTitles.length;
@@ -651,12 +653,14 @@
         const djName = getDjName();
         const queueChanged = Boolean(result.queueChanged);
         if (queueChanged) {
-          queue = (Array.isArray(result.queue) && result.queue.length ? result.queue : queue).map(normalizeTrack);
+          queue = Array.isArray(result.queue) ? result.queue.map(normalizeTrack) : queue;
           currentIndex = 0;
-          currentTrack = normalizeTrack(result.currentTrack || result.track || queue[0], 0);
-          if (result.dj && result.dj.trackIntro) currentTrack.trackIntro = result.dj.trackIntro;
-          if (result.playback && result.playback.mode) currentTrack.playbackSource = result.playback;
-          queue[0] = currentTrack;
+          currentTrack = result.currentTrack || result.track || queue[0]
+            ? normalizeTrack(result.currentTrack || result.track || queue[0], 0)
+            : null;
+          if (currentTrack && result.dj && result.dj.trackIntro) currentTrack.trackIntro = result.dj.trackIntro;
+          if (currentTrack && result.playback && result.playback.mode) currentTrack.playbackSource = result.playback;
+          if (currentTrack) queue[0] = currentTrack;
           playback = result.playback && ["cli", "stream"].includes(result.playback.mode)
             ? result.playback
             : playbackFromTrack(currentTrack);
@@ -688,7 +692,7 @@
         renderPlayer();
         renderQueue();
         markActiveChannel();
-        if (queueChanged) {
+        if (queueChanged && currentTrack) {
           rememberTrack(currentTrack);
           playingNow = true;
           await playCurrent();

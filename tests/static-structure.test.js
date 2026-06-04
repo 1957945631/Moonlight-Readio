@@ -60,6 +60,12 @@ test("frontend playback guards stream resume and failed track recovery", () => {
   assert.doesNotMatch(app, /这首需要在网易云外部打开/);
 });
 
+test("frontend clears stale local queue when backend returns an empty replacement queue", () => {
+  const app = fs.readFileSync(webAppPath, "utf8");
+  assert.match(app, /Array\.isArray\(result\.queue\) \? result\.queue\.map\(normalizeTrack\) : queue/);
+  assert.match(app, /if \(queueChanged && currentTrack\)/);
+});
+
 test("frontend schedule starts from real time and avoids technical DJ status copy", () => {
   const app = fs.readFileSync(webAppPath, "utf8");
   assert.match(app, /function resolveScheduleFromTime\(now = new Date\(\)\)/);

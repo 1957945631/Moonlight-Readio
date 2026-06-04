@@ -480,6 +480,99 @@ test("radio chat filters external and unavailable tracks out of generated queues
   assert.equal(result.playback.mode, "cli");
 });
 
+test("radio service hides local startup tracks from remote ai context", async () => {
+  let receivedInput;
+  const startupQueue = [
+    { id: "local-1", title: "Monday Night Exhale", artist: "Moonlight" },
+    { id: "local-2", title: "Fade Into You", artist: "Mazzy Star" },
+  ];
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan(input) {
+        receivedInput = input;
+        return {
+          provider: "mock",
+          status: "ready",
+          intent: "chat",
+          shouldChangeQueue: false,
+          djText: "我喜欢认真、有表达的音乐。",
+          whyThisSong: "这只是聊天，不应该引用启动占位曲库。",
+          moodChannel: "私人聊天",
+          strategy: "不换歌",
+          searchQueries: [],
+          queueIntent: "keep",
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        return [];
+      },
+      async getPlaybackSource() {
+        return { mode: "unavailable", reason: "没有真实播放目标" };
+      },
+    },
+  });
+
+  const result = await radio.chat({
+    text: "你喜欢什么音乐",
+    queue: startupQueue,
+    currentTrack: startupQueue[0],
+  });
+
+  assert.equal(receivedInput.currentTrack, null);
+  assert.deepEqual(receivedInput.context.queue, []);
+  assert.deepEqual(result.queue, []);
+  assert.equal(result.currentTrack, null);
+  assert.equal(result.playback.mode, "unavailable");
+});
+
+test("radio service does not fall back to local library when remote search has no playable queue", async () => {
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan() {
+        return {
+          provider: "mock",
+          status: "ready",
+          intent: "replace_queue",
+          shouldChangeQueue: true,
+          djText: "我重新找一组。",
+          whyThisSong: "必须来自远端可播放结果。",
+          moodChannel: "私人电台",
+          strategy: "搜索真实音源",
+          searchQueries: ["不存在的歌"],
+          queueIntent: "replace",
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        return [];
+      },
+      async getPlaybackSource() {
+        return { mode: "unavailable", reason: "没有真实播放目标" };
+      },
+    },
+  });
+
+  const result = await radio.chat({
+    text: "可以那给我推荐一些",
+    queue: [{ id: "local-1", title: "Monday Night Exhale", artist: "Moonlight" }],
+    currentTrack: { id: "local-1", title: "Monday Night Exhale", artist: "Moonlight" },
+  });
+
+  assert.equal(result.queueChanged, true);
+  assert.deepEqual(result.queue, []);
+  assert.equal(result.currentTrack, null);
+  assert.equal(result.playback.mode, "unavailable");
+});
+
 test("radio chat removes duplicate title and artist results from generated queues", async () => {
   const radio = createRadioService({
     aiProvider: {
@@ -1037,7 +1130,9 @@ test("radio service combines ai plan with music provider status", async () => {
   assert.equal(result.ai.status, "ready");
   assert.equal(result.music.provider, "netease");
   assert.equal(result.music.authorized, false);
-  assert.equal(result.playback.mode, "external");
+  assert.equal(result.playback.mode, "unavailable");
+  assert.deepEqual(result.queue, []);
+  assert.equal(result.currentTrack, null);
   assert.match(result.ui.statusText, /AI 模拟中/);
   assert.match(result.ui.platformText, /网易云/);
 });

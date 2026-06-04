@@ -107,6 +107,24 @@ function enrichTrack(track, provider, index) {
   };
 }
 
+function usesRemoteCatalog(provider) {
+  return provider && (provider.name === "netease" || provider.name === "netease-cli");
+}
+
+function trackNameKey(track) {
+  return `${String(track && track.title || "").trim().toLowerCase()}::${String(track && track.artist || "").trim().toLowerCase()}`;
+}
+
+const LOCAL_LIBRARY_KEYS = new Set(TRACKS.map(trackNameKey));
+
+function isLocalLibraryTrack(track) {
+  if (!track) return false;
+  const id = String(track.id || "");
+  if (id.startsWith("local-")) return true;
+  if (String(track.sourceLabel || "") === "本地曲库") return true;
+  return !id.startsWith("ncm:") && LOCAL_LIBRARY_KEYS.has(trackNameKey(track));
+}
+
 function inferIntent(text) {
   const value = String(text || "");
   if (/别换|不要换|先不换|聊会|聊一会|陪我聊|为什么|解释/.test(value)) return "chat";
@@ -158,6 +176,7 @@ function queriesWithPersonaTaste(aiPlan, text, channel, persona) {
 function normalizeExistingQueue(payload, provider) {
   return (Array.isArray(payload.queue) ? payload.queue : [])
     .filter(Boolean)
+    .filter((track) => !(usesRemoteCatalog(provider) && isLocalLibraryTrack(track)))
     .map((track, index) => enrichTrack(track, provider, index));
 }
 
@@ -236,8 +255,11 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
       ? selectTrack({ ...getInitialState(), ...payload.state }, payload.state.current)
       : getInitialState();
     const localState = routeMoodInput(previousState, text || channel.query);
-    const currentTrack = payload.currentTrack || TRACKS[localState.current];
     const existingQueue = normalizeExistingQueue(payload, musicProvider);
+    const payloadCurrentTrack = payload.currentTrack && !(usesRemoteCatalog(musicProvider) && isLocalLibraryTrack(payload.currentTrack))
+      ? payload.currentTrack
+      : null;
+    const currentTrack = payloadCurrentTrack || existingQueue[0] || (usesRemoteCatalog(musicProvider) ? null : TRACKS[localState.current]);
     const aiPlan = await aiProvider.plan({
       text,
       currentTrack,
@@ -257,9 +279,11 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
     const finalIntent = resolveFinalIntent(aiPlan, text, changeQueue);
     const queue = changeQueue
       ? await collectQueue({ aiPlan, text, channel, payload, provider: musicProvider, persona })
-      : (existingQueue.length ? existingQueue : [enrichTrack(currentTrack, musicProvider, 0)]);
-    const recommendedTrack = queue[0] || enrichTrack(currentTrack, musicProvider, 0);
-    const playback = await musicProvider.getPlaybackSource(recommendedTrack.id);
+      : (existingQueue.length ? existingQueue : (currentTrack ? [enrichTrack(currentTrack, musicProvider, 0)] : []));
+    const recommendedTrack = queue[0] || (currentTrack ? enrichTrack(currentTrack, musicProvider, 0) : null);
+    const playback = recommendedTrack
+      ? await musicProvider.getPlaybackSource(recommendedTrack.id)
+      : { mode: "unavailable", reason: "当前没有真实可播放队列" };
     const state = buildState(localState, aiPlan, channel, text);
     const conversation = mergeConversation(payload.conversation, payload.text || "", aiPlan.reply || aiPlan.djText, aiPlan.whyThisSong, {
       includeReason: changeQueue,
@@ -315,8 +339,13 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
       const persona = resolvePersona(personaRegistry, payload.personaId);
       const localState = { ...getInitialState(), ...(payload.state || {}) };
       const existingQueue = normalizeExistingQueue(payload, musicProvider);
-      const currentTrack = enrichTrack(payload.currentTrack || existingQueue[0] || TRACKS[localState.current] || TRACKS[0], musicProvider, 0);
-      const queue = existingQueue.length ? existingQueue : [currentTrack];
+      const payloadCurrentTrack = payload.currentTrack && !(usesRemoteCatalog(musicProvider) && isLocalLibraryTrack(payload.currentTrack))
+        ? payload.currentTrack
+        : null;
+      const currentTrack = payloadCurrentTrack
+        ? enrichTrack(payloadCurrentTrack, musicProvider, 0)
+        : existingQueue[0] || (usesRemoteCatalog(musicProvider) ? null : enrichTrack(TRACKS[localState.current] || TRACKS[0], musicProvider, 0));
+      const queue = existingQueue.length ? existingQueue : (currentTrack ? [currentTrack] : []);
       const playback = payload.playback && payload.playback.mode
         ? payload.playback
         : { mode: "unavailable", reason: "上一首播放失败，已交给 DJ 过渡" };
