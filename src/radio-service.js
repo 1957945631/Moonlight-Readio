@@ -167,6 +167,13 @@ function personaTasteQueries(persona) {
 function queriesWithPersonaTaste(aiPlan, text, channel, persona) {
   const baseQueries = normalizeQueries(aiPlan, text, channel);
   const tasteQueries = personaTasteQueries(persona);
+  const constraints = extractRecommendationConstraints(text);
+  if (constraints.hasConstraints) {
+    const constraintQueries = buildConstraintQueries(constraints);
+    const compatibleTaste = tasteQueries.filter((query) => queryMatchesConstraints(query, constraints));
+    const compatibleBase = baseQueries.filter((query) => queryMatchesConstraints(query, constraints));
+    return [...new Set([...constraintQueries, ...compatibleTaste, ...compatibleBase])].slice(0, 12);
+  }
   if (!tasteQueries.length) return baseQueries;
   const userText = String(text || "").trim();
   const combinedQueries = userText ? tasteQueries.map((query) => `${userText} ${query}`) : [];
@@ -182,6 +189,139 @@ function normalizeExistingQueue(payload, provider) {
 
 function trackDedupeKey(track) {
   return `${String(track.title || "").trim().toLowerCase()}::${String(track.artist || "").trim().toLowerCase()}`;
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractRequestedArtists(text) {
+  const value = String(text || "");
+  const artists = [];
+  const patterns = [
+    /(?:放|听|来点|来一组|一组|想听|播放)\s*(?:一组|一些|几首)?\s*([\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9 .&'!-]{0,30})\s*(?:乐队|樂隊|band)\b/ig,
+    /([A-Za-z][A-Za-z0-9 .&'!-]{1,40})\s*(?:乐队|樂隊|band)\b/ig,
+    /(?:放|听|来点|来一组|一组|想听|播放)\s*(?:一组|一些|几首)?\s*([\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9 .&'!-]{0,30})\s*(?:的歌|歌曲|作品)/ig,
+    /(?:放|听|来点|来一组|一组|想听|播放)\s*([A-Za-z][A-Za-z0-9 .&'!-]{1,40})\s*(?:的歌|歌曲|作品|歌)?/ig,
+  ];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(value))) {
+      const artist = normalizeSearchText(match[1]);
+      if (artist && !/^(song|music|rock|band)$/.test(artist)) artists.push(artist);
+    }
+  }
+  return [...new Set(artists)];
+}
+
+function matchesRequestedArtist(track, requestedArtists) {
+  if (!requestedArtists.length) return true;
+  const artist = normalizeSearchText(track && track.artist);
+  if (!artist) return false;
+  return requestedArtists.some((requested) => {
+    const paddedArtist = ` ${artist} `;
+    const paddedRequested = ` ${requested} `;
+    return paddedArtist.includes(paddedRequested) || paddedRequested.includes(paddedArtist);
+  });
+}
+
+const STYLE_RULES = [
+  {
+    id: "rock",
+    triggers: ["摇滚", "搖滾", "rock"],
+    querySeeds: ["摇滚 乐队", "独立摇滚", "华语 摇滚 乐队"],
+    evidence: ["摇滚", "搖滾", "rock", "乐队", "樂隊", "band", "punk", "metal", "grunge"],
+  },
+  {
+    id: "folk",
+    triggers: ["民谣", "民謠", "folk"],
+    querySeeds: ["民谣", "中文 民谣", "folk"],
+    evidence: ["民谣", "民謠", "folk"],
+  },
+  {
+    id: "electronic",
+    triggers: ["电子", "電音", "electronic", "techno", "ambient"],
+    querySeeds: ["电子 音乐", "ambient electronic", "techno"],
+    evidence: ["电子", "電音", "electronic", "techno", "ambient", "synth"],
+  },
+  {
+    id: "jazz",
+    triggers: ["爵士", "jazz"],
+    querySeeds: ["爵士", "jazz"],
+    evidence: ["爵士", "jazz"],
+  },
+  {
+    id: "rap",
+    triggers: ["说唱", "嘻哈", "rap", "hip hop", "hiphop"],
+    querySeeds: ["说唱", "中文 说唱", "hip hop"],
+    evidence: ["说唱", "嘻哈", "rap", "hip hop", "hiphop"],
+  },
+];
+
+function extractRequestedStyles(text) {
+  const value = normalizeSearchText(text);
+  if (!value) return [];
+  return STYLE_RULES.filter((rule) => rule.triggers.some((trigger) => value.includes(normalizeSearchText(trigger))));
+}
+
+function extractRecommendationConstraints(text) {
+  const artists = extractRequestedArtists(text);
+  const styles = extractRequestedStyles(text);
+  return {
+    artists,
+    styles,
+    hasConstraints: artists.length > 0 || styles.length > 0,
+  };
+}
+
+function queryMatchesRequestedArtists(query, artists) {
+  if (!artists.length) return true;
+  const value = normalizeSearchText(query);
+  return artists.some((artist) => value.includes(artist));
+}
+
+function queryMatchesRequestedStyles(query, styles) {
+  if (!styles.length) return true;
+  const value = normalizeSearchText(query);
+  return styles.some((style) => style.evidence.some((term) => value.includes(normalizeSearchText(term))));
+}
+
+function queryMatchesConstraints(query, constraints) {
+  return queryMatchesRequestedArtists(query, constraints.artists)
+    && queryMatchesRequestedStyles(query, constraints.styles);
+}
+
+function buildConstraintQueries(constraints) {
+  const artistQueries = constraints.artists.flatMap((artist) => [
+    artist,
+    `${artist} 乐队`,
+    `${artist} songs`,
+  ]);
+  const styleQueries = constraints.styles.flatMap((style) => style.querySeeds);
+  return [...new Set([...artistQueries, ...styleQueries].map((query) => String(query || "").trim()).filter(Boolean))];
+}
+
+function trackMatchesRequestedStyles(track, styles) {
+  if (!styles.length) return true;
+  const metadata = normalizeSearchText([
+    track && track.title,
+    track && track.artist,
+    track && track.album,
+    track && track.mood,
+    track && track.sourceLabel,
+  ].filter(Boolean).join(" "));
+  return styles.some((style) => style.evidence.some((term) => metadata.includes(normalizeSearchText(term))));
+}
+
+function matchesRecommendationConstraints(track, constraints) {
+  return matchesRequestedArtist(track, constraints.artists)
+    && trackMatchesRequestedStyles(track, constraints.styles);
 }
 
 function mergeConversation(existing, userText, reply, whyThisSong, options = {}) {
@@ -282,6 +422,7 @@ function resolveFinalIntent(aiPlan, text, changeQueue) {
 
 async function collectQueue({ aiPlan, text, channel, payload, provider, persona }) {
   const queries = queriesWithPersonaTaste(aiPlan, text, channel, persona);
+  const constraints = extractRecommendationConstraints(text);
   const recent = new Set([
     ...(payload.recentTrackIds || []),
     ...(payload.blockedTrackIds || []),
@@ -294,6 +435,7 @@ async function collectQueue({ aiPlan, text, channel, payload, provider, persona 
     const results = await provider.searchTracks(query, aiPlan.mood || aiPlan.moodChannel);
     for (const rawTrack of results || []) {
       const track = enrichTrack(rawTrack, provider, tracks.length);
+      if (!matchesRecommendationConstraints(track, constraints)) continue;
       const nameKey = trackDedupeKey(track);
       if (!track.id || seen.has(track.id) || recent.has(track.id) || seenNames.has(nameKey)) continue;
       const playback = await provider.getPlaybackSource(track.id);

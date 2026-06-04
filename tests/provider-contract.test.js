@@ -1527,13 +1527,13 @@ test("radio service injects persona music taste keywords into actual search", as
   });
 
   const result = await radio.chat({
-    text: "我想听有态度的摇滚，别太温柔",
+    text: "我想听有态度的音乐，别太温柔",
     personaId: "taste-dj",
   });
 
   assert.deepEqual(searchQueries, [
-    "我想听有态度的摇滚，别太温柔 华语 独立 摇滚 态度",
-    "我想听有态度的摇滚，别太温柔 中文 民谣 真诚 不煽情",
+    "我想听有态度的音乐，别太温柔 华语 独立 摇滚 态度",
+    "我想听有态度的音乐，别太温柔 中文 民谣 真诚 不煽情",
     "华语 独立 摇滚 态度",
     "中文 民谣 真诚 不煽情",
     "通用 安静",
@@ -1692,6 +1692,154 @@ test("radio service visible queue filters out external and unavailable tracks", 
   assert.deepEqual(result.queue.map((track) => track.id), ["ncm:stream", "ncm:cli"]);
 });
 
+test("radio service filters artist-specific requests to matching artists", async () => {
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan() {
+        return {
+          provider: "mock",
+          status: "ready",
+          musicIntent: "refresh_queue",
+          queueChanged: true,
+          reply: "放一组 Queen。",
+          whyThisSong: "用户指定了乐队。",
+          mood: "经典摇滚",
+          djDirection: "只保留指定艺人。",
+          searchQueries: ["Queen"],
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        return [
+          { id: "ncm:wrong-title", title: "Queen", artist: "Morgan knight" },
+          { id: "ncm:wrong-cn", title: "人质", artist: "张惠妹" },
+          { id: "ncm:bohemian", title: "Bohemian Rhapsody", artist: "Queen" },
+          { id: "ncm:rock-you", title: "We Will Rock You", artist: "Queen" },
+          { id: "ncm:collab", title: "Under Pressure", artist: "Queen / David Bowie" },
+        ];
+      },
+      async getPlaybackSource() {
+        return { mode: "stream", url: "https://audio.example/song.mp3", reason: "stream" };
+      },
+    },
+  });
+
+  const result = await radio.chat({ text: "放一组queen乐队的歌" });
+
+  assert.deepEqual(result.queue.map((track) => `${track.title}-${track.artist}`), [
+    "Bohemian Rhapsody-Queen",
+    "We Will Rock You-Queen",
+    "Under Pressure-Queen / David Bowie",
+  ]);
+});
+
+test("radio service filters Chinese artist requests to matching artists", async () => {
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan() {
+        return {
+          provider: "mock",
+          status: "ready",
+          musicIntent: "refresh_queue",
+          queueChanged: true,
+          reply: "放几首许嵩。",
+          whyThisSong: "用户指定了歌手。",
+          mood: "指定艺人",
+          djDirection: "只保留指定歌手。",
+          searchQueries: ["许嵩"],
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        return [
+          { id: "ncm:wrong", title: "有何不可", artist: "张三" },
+          { id: "ncm:xusong-1", title: "有何不可", artist: "许嵩" },
+          { id: "ncm:xusong-2", title: "素颜", artist: "许嵩 / 何曼婷" },
+        ];
+      },
+      async getPlaybackSource() {
+        return { mode: "stream", url: "https://audio.example/song.mp3", reason: "stream" };
+      },
+    },
+  });
+
+  const result = await radio.chat({ text: "放几首许嵩的歌" });
+
+  assert.deepEqual(result.queue.map((track) => `${track.title}-${track.artist}`), [
+    "有何不可-许嵩",
+    "素颜-许嵩 / 何曼婷",
+  ]);
+});
+
+test("radio service treats explicit style requests as hard relevance constraints", async () => {
+  const searchQueries = [];
+  const registry = new Map([["taste-dj", {
+    id: "taste-dj",
+    name: "品味 DJ",
+    musicTaste: {
+      keywords: ["华语 独立 摇滚 态度", "中文 民谣 真诚 不煽情", "城市 夜晚 独立 华语"],
+      arrangementStyle: "有态度的华语独立和民谣为主",
+    },
+  }]]);
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan() {
+        return {
+          provider: "mock",
+          status: "ready",
+          musicIntent: "refresh_queue",
+          queueChanged: true,
+          reply: "来点摇滚。",
+          whyThisSong: "用户指定了风格。",
+          mood: "摇滚",
+          djDirection: "摇滚乐队优先。",
+          searchQueries: ["通用 华语"],
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks(query) {
+        searchQueries.push(query);
+        return [
+          { id: "ncm:pop", title: "红", artist: "罗言", album: "红", duration: "2:41" },
+          { id: "ncm:folk", title: "民谣歌", artist: "Folk Singer", album: "民谣", duration: "3:12" },
+          { id: "ncm:band", title: "爱是拥有", artist: "SummerVapour乐队", album: "爱是拥有", duration: "3:52" },
+          { id: "ncm:album", title: "Bring You Down", artist: "Ships Have Sailed", album: "後院烤肉獨立搖滾樂", duration: "3:22" },
+        ];
+      },
+      async getPlaybackSource() {
+        return { mode: "stream", url: "https://audio.example/song.mp3", reason: "stream" };
+      },
+    },
+    personaRegistry: registry,
+  });
+
+  const result = await radio.chat({ text: "来点摇滚乐", personaId: "taste-dj" });
+
+  assert.deepEqual(searchQueries.slice(0, 4), [
+    "摇滚 乐队",
+    "独立摇滚",
+    "华语 摇滚 乐队",
+    "华语 独立 摇滚 态度",
+  ]);
+  assert.equal(searchQueries.includes("中文 民谣 真诚 不煽情"), false);
+  assert.deepEqual(result.queue.map((track) => `${track.title}-${track.artist}`), [
+    "爱是拥有-SummerVapour乐队",
+    "Bring You Down-Ships Have Sailed",
+  ]);
+});
+
 test("radio service overrides ai chat_only when local text clearly asks for tuning", async () => {
   const searchQueries = [];
   const registry = new Map([["taste-dj", {
@@ -1723,7 +1871,7 @@ test("radio service overrides ai chat_only when local text clearly asks for tuni
       authorized: true,
       async searchTracks(query) {
         searchQueries.push(query);
-        return [{ id: `ncm:${searchQueries.length}`, title: "Song", artist: "Artist" }];
+        return [{ id: `ncm:${searchQueries.length}`, title: "Song", artist: "测试乐队" }];
       },
       async getPlaybackSource() {
         return { mode: "stream", url: "https://audio.example/song.mp3", reason: "playable" };
@@ -1739,7 +1887,8 @@ test("radio service overrides ai chat_only when local text clearly asks for tuni
 
   assert.equal(result.queueChanged, true);
   assert.notEqual(result.intent, "chat_only");
-  assert.match(result.searchQueries[0], /独立 摇滚 态度/);
+  assert.equal(result.searchQueries[0], "摇滚 乐队");
+  assert.ok(result.searchQueries.includes("独立 摇滚 态度"));
 });
 
 test("radio service falls back to base protocol when persona is missing", async () => {
