@@ -1,4 +1,11 @@
-const { composeSystemPrompt, composeUserPrompt } = require("../dj/prompt-composer.js");
+const {
+  composeSystemPrompt,
+  composeUserPrompt,
+  composeExpressionSystemPrompt,
+  composeExpressionUserPrompt,
+  composeMusicSystemPrompt,
+  composeMusicUserPrompt,
+} = require("../dj/prompt-composer.js");
 
 const DEFAULT_MODEL = "gpt-4.1-mini";
 
@@ -131,6 +138,16 @@ function uniqueQueries(queries) {
   return [...new Set(queries.map((query) => String(query || "").trim()).filter(Boolean))];
 }
 
+function personaMusicFallbackQueries(persona, text) {
+  const taste = persona && persona.musicTaste ? persona.musicTaste : {};
+  return uniqueQueries([
+    ...(Array.isArray(taste.keywords) ? taste.keywords : []),
+    ...(Array.isArray(taste.preferred) ? taste.preferred : []),
+    taste.arrangementStyle,
+    text && !persona ? text : "",
+  ]);
+}
+
 function extractOutputText(response) {
   if (typeof response.output_text === "string") return response.output_text;
   if (Array.isArray(response.choices)) {
@@ -158,6 +175,60 @@ function parseJsonOutput(text) {
   }
 }
 
+function createExpressionPayload(input, model) {
+  return {
+    model,
+    messages: [
+      { role: "system", content: composeExpressionSystemPrompt(input.persona) },
+      { role: "user", content: composeExpressionUserPrompt(input) },
+    ],
+    response_format: { type: "json_object" },
+  };
+}
+
+function createMusicPayload(input, model) {
+  return {
+    model,
+    messages: [
+      { role: "system", content: composeMusicSystemPrompt(input.persona) },
+      { role: "user", content: composeMusicUserPrompt(input) },
+    ],
+    response_format: { type: "json_object" },
+  };
+}
+
+async function requestJsonPlan({ requestFetch, baseUrl, apiKey, payload, label }) {
+  const response = await requestFetch(`${baseUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    const details = errorText ? ` ${errorText.slice(0, 300)}` : "";
+    throw new Error(`${label} OpenAI request failed: ${response.status}${details}`);
+  }
+  const data = await response.json();
+  return parseJsonOutput(extractOutputText(data));
+}
+
+function mergeExpressionAndMusicPlan({ expression, music, input, provider, status, error }) {
+  const merged = normalizePlan({
+    ...expression,
+    searchQueries: Array.isArray(music.searchQueries || music.search_queries)
+      ? (music.searchQueries || music.search_queries)
+      : [],
+    avoidRules: Array.isArray(music.avoidRules || music.avoid_rules)
+      ? (music.avoidRules || music.avoid_rules)
+      : [],
+  }, input.text, provider, status);
+  if (error) merged.error = error;
+  return merged;
+}
+
 function createOpenAiProvider(config) {
   const env = getRuntimeEnv(config);
   const apiKey = config.apiKey || env.OPENAI_API_KEY;
@@ -179,6 +250,59 @@ function createOpenAiProvider(config) {
       const model = config.model || env.OPENAI_MODEL || DEFAULT_MODEL;
       const systemPrompt = composeSystemPrompt(input.persona);
       const userPrompt = composeUserPrompt(input);
+      if (apiStyle === "chat") {
+        const expressionPromise = requestJsonPlan({
+          requestFetch,
+          baseUrl,
+          apiKey,
+          payload: createExpressionPayload(input, model),
+          label: "expression",
+        });
+        const musicPromise = requestJsonPlan({
+          requestFetch,
+          baseUrl,
+          apiKey,
+          payload: createMusicPayload(input, model),
+          label: "music",
+        });
+        const [expressionResult, musicResult] = await Promise.allSettled([expressionPromise, musicPromise]);
+        const errors = [];
+        const expression = expressionResult.status === "fulfilled"
+          ? expressionResult.value
+          : (() => {
+            errors.push(expressionResult.reason && expressionResult.reason.message ? expressionResult.reason.message : "expression failed");
+            const fallbackReply = buildPersonaFallbackReply(input.persona, input.text || "", false);
+            return {
+              reply: input.persona && input.persona.name ? `${input.persona.name}：${fallbackReply}` : fallbackReply,
+              queueChanged: true,
+              musicIntent: "refresh_queue",
+              mood: "情绪回温",
+              djDirection: input.persona && input.persona.musicTaste && input.persona.musicTaste.arrangementStyle
+                ? input.persona.musicTaste.arrangementStyle
+                : "先放慢，再贴近你的状态",
+              hostQuestion: "",
+              trackIntro: "",
+              persona: input.persona ? input.persona.id : "",
+            };
+          })();
+        const music = musicResult.status === "fulfilled"
+          ? musicResult.value
+          : (() => {
+            errors.push(musicResult.reason && musicResult.reason.message ? musicResult.reason.message : "music failed");
+            return {
+              searchQueries: personaMusicFallbackQueries(input.persona, input.text),
+              avoidRules: [],
+            };
+          })();
+        return mergeExpressionAndMusicPlan({
+          expression,
+          music,
+          input,
+          provider: "openai",
+          status: errors.length ? "fallback" : "ready",
+          error: errors.join(" | "),
+        });
+      }
       const responsesPayload = {
         model: config.model || env.OPENAI_MODEL || DEFAULT_MODEL,
         input: [
@@ -215,15 +339,8 @@ function createOpenAiProvider(config) {
           },
         },
       };
-      const chatPayload = {
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-      };
-      const endpoint = apiStyle === "chat" ? "/v1/chat/completions" : "/v1/responses";
-      const payload = apiStyle === "chat" ? chatPayload : responsesPayload;
+      const endpoint = "/v1/responses";
+      const payload = responsesPayload;
 
       try {
         const response = await requestFetch(`${baseUrl}${endpoint}`, {

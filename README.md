@@ -8,7 +8,7 @@ Moonlight 是一个 AI 私人音乐电台原型。用户和“月亮 DJ”聊天
 
 - 公开地址：`https://moonlightdio.peifengwu622.workers.dev/`
 - 默认分支：`main`
-- 云端 AI：`OPENAI_BASE_URL=https://api.deepseek.com`，`OPENAI_MODEL=deepseek-v4-flash`
+- 云端 AI：`OPENAI_BASE_URL=https://api.deepseek.com`，`OPENAI_MODEL=deepseek-chat`
 - 云端音乐：`MUSIC_PROVIDER=netease`，`NETEASE_API_BASE=https://api-enhanced-umber-ten.vercel.app`
 - 前端入口：`web/index.html` + `web/app.js` + `web/styles.css`
 - Worker 入口：`worker/index.js`
@@ -56,7 +56,7 @@ AI_PROVIDER=openai
 OPENAI_API_KEY=你的 DeepSeek API key
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_STYLE=chat
-OPENAI_MODEL=deepseek-v4-flash
+OPENAI_MODEL=deepseek-chat
 ```
 
 本地使用网易云 API：
@@ -79,7 +79,7 @@ NETEASE_AUDIO_LEVEL=standard
   "vars": {
     "AI_PROVIDER": "openai",
     "OPENAI_BASE_URL": "https://api.deepseek.com",
-    "OPENAI_MODEL": "deepseek-v4-flash",
+    "OPENAI_MODEL": "deepseek-chat",
     "OPENAI_API_STYLE": "chat",
     "MUSIC_PROVIDER": "netease",
     "NETEASE_API_BASE": "https://api-enhanced-umber-ten.vercel.app",

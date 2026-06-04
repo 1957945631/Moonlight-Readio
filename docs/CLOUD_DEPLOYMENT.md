@@ -22,7 +22,7 @@ GitHub repo deploys from `main`.
 ```text
 AI_PROVIDER=openai
 OPENAI_BASE_URL=https://api.deepseek.com
-OPENAI_MODEL=deepseek-v4-flash
+OPENAI_MODEL=deepseek-chat
 OPENAI_API_STYLE=chat
 MUSIC_PROVIDER=netease
 NETEASE_API_BASE=https://api-enhanced-umber-ten.vercel.app

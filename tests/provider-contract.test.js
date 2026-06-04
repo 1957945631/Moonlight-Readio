@@ -6,7 +6,14 @@ const { createAiProvider } = require("../src/providers/ai-provider.js");
 const { createMusicProvider } = require("../src/providers/music-provider.js");
 const { createRadioService } = require("../src/radio-service.js");
 const { loadEnvFile } = require("../src/env.js");
-const { composeSystemPrompt, composeUserPrompt } = require("../src/dj/prompt-composer.js");
+const {
+  composeSystemPrompt,
+  composeUserPrompt,
+  composeExpressionSystemPrompt,
+  composeExpressionUserPrompt,
+  composeMusicSystemPrompt,
+  composeMusicUserPrompt,
+} = require("../src/dj/prompt-composer.js");
 const { loadPersonas, resolvePersona } = require("../src/dj/persona-registry.js");
 
 async function test(name, fn) {
@@ -113,6 +120,55 @@ test("prompt composer combines base protocol and persona music taste", () => {
   assert.deepEqual(userPrompt.personaStyle.mentalModels, persona.mentalModels);
   assert.deepEqual(userPrompt.personaStyle.decisionHeuristics, persona.decisionHeuristics);
   assert.deepEqual(userPrompt.personaStyle.examples, persona.examples);
+});
+
+test("prompt composer splits expression and music prompts by responsibility", () => {
+  const persona = {
+    id: "split-dj",
+    name: "拆分 DJ",
+    identity: "我是拆分 DJ。",
+    expression: "短句，先说结论。",
+    expressionDNA: {
+      rhythm: "先给判断，再落到安排。",
+      tone: "直接。",
+    },
+    musicTaste: {
+      philosophy: "真诚、有态度。",
+      preferred: ["华语独立"],
+      avoided: ["短视频热歌"],
+      keywords: ["华语 独立", "中文 民谣"],
+      arrangementStyle: "先留空间，再推进。",
+    },
+  };
+
+  const expressionSystem = composeExpressionSystemPrompt(persona);
+  const musicSystem = composeMusicSystemPrompt(persona);
+  const expressionUser = JSON.parse(composeExpressionUserPrompt({
+    text: "有点累",
+    currentTrack: { title: "Old Song" },
+    context: { channel: "夜间慢放", conversation: [] },
+    persona,
+  }));
+  const musicUser = JSON.parse(composeMusicUserPrompt({
+    text: "有点累",
+    currentTrack: { title: "Old Song" },
+    context: { channel: "夜间慢放", likedTitles: [] },
+    persona,
+  }));
+
+  assert.match(expressionSystem, /我是拆分 DJ/);
+  assert.match(expressionSystem, /表达 DNA/);
+  assert.match(expressionSystem, /queueChanged/);
+  assert.doesNotMatch(expressionSystem, /音乐审美/);
+  assert.doesNotMatch(expressionSystem, /searchQueries/);
+  assert.match(musicSystem, /音乐编排引擎/);
+  assert.match(musicSystem, /华语 独立/);
+  assert.match(musicSystem, /searchQueries/);
+  assert.doesNotMatch(musicSystem, /表达 DNA/);
+  assert.doesNotMatch(musicSystem, /我是拆分 DJ/);
+  assert.equal(expressionUser.userText, "有点累");
+  assert.equal(expressionUser.personaStyle.expression, "短句，先说结论。");
+  assert.deepEqual(musicUser.musicTaste.keywords, ["华语 独立", "中文 民谣"]);
 });
 
 test("mock ai provider adapts copy from generic persona data", async () => {
@@ -483,19 +539,28 @@ test("openai provider can use a custom chat-compatible reverse proxy", async () 
     apiStyle: "chat",
     fetch: async (url, options) => {
       requests.push({ url, options });
+      const body = JSON.parse(options.body);
+      const isMusic = /音乐编排引擎/.test(body.messages[0].content);
       return {
         ok: true,
         json: async () => ({
           choices: [{
             message: {
-              content: JSON.stringify({
-                djText: "真实反代 DJ 文案",
-                whyThisSong: "因为它更安静。",
-                moodChannel: "情绪回温",
-                strategy: "先降噪",
-                nextTrackQuery: "安静 人声",
-                queueIntent: "continue",
-              }),
+              content: JSON.stringify(isMusic
+                ? {
+                  searchQueries: ["安静 人声"],
+                  avoidRules: ["避开太吵"],
+                }
+                : {
+                  reply: "真实反代 DJ 文案",
+                  queueChanged: true,
+                  musicIntent: "refresh_queue",
+                  mood: "情绪回温",
+                  djDirection: "先降噪",
+                  hostQuestion: "",
+                  trackIntro: "",
+                  persona: "",
+                }),
             },
           }],
         }),
@@ -506,12 +571,15 @@ test("openai provider can use a custom chat-compatible reverse proxy", async () 
   const plan = await ai.plan({ text: "累", currentTrack: {}, context: {} });
 
   assert.equal(requests[0].url, "http://16.176.195.43:3000/v1/chat/completions");
+  assert.equal(requests.length, 2);
   assert.equal(JSON.parse(requests[0].options.body).model, "claude-sonnet-4.5");
+  assert.equal(JSON.parse(requests[1].options.body).model, "claude-sonnet-4.5");
   assert.equal(plan.provider, "openai");
   assert.equal(plan.djText, "真实反代 DJ 文案");
+  assert.deepEqual(plan.searchQueries, ["安静 人声"]);
 });
 
-test("openai provider uses new schema and composed persona prompt", async () => {
+test("openai provider uses split prompts and json object chat payloads", async () => {
   const requests = [];
   const persona = {
     id: "test-dj",
@@ -528,23 +596,28 @@ test("openai provider uses new schema and composed persona prompt", async () => 
     apiStyle: "chat",
     fetch: async (url, options) => {
       requests.push({ url, options });
+      const body = JSON.parse(options.body);
+      const isMusic = /音乐编排引擎/.test(body.messages[0].content);
       return {
         ok: true,
         json: async () => ({
           choices: [{
             message: {
-              content: JSON.stringify({
-                reply: "歌不用换。",
-                queueChanged: false,
-                musicIntent: "chat_only",
-                mood: "私人聊天",
-                djDirection: "不换歌",
-                searchQueries: [],
-                hostQuestion: "",
-                avoidRules: [],
-                trackIntro: "",
-                persona: "test-dj",
-              }),
+              content: JSON.stringify(isMusic
+                ? {
+                  searchQueries: ["华语 独立", "独立、松弛"],
+                  avoidRules: ["短视频热歌"],
+                }
+                : {
+                  reply: "歌不用换。",
+                  queueChanged: false,
+                  musicIntent: "chat_only",
+                  mood: "私人聊天",
+                  djDirection: "不换歌",
+                  hostQuestion: "",
+                  trackIntro: "",
+                  persona: "test-dj",
+                }),
             },
           }],
         }),
@@ -560,10 +633,116 @@ test("openai provider uses new schema and composed persona prompt", async () => 
   });
 
   const body = JSON.parse(requests[0].options.body);
+  const musicBody = JSON.parse(requests[1].options.body);
+  assert.equal(requests.length, 2);
   assert.match(body.messages[0].content, /我是测试 DJ/);
   assert.match(body.messages[0].content, /reply/);
   assert.match(body.messages[0].content, /queueChanged/);
-  assert.match(body.messages[1].content, /华语 独立/);
+  assert.doesNotMatch(body.messages[0].content, /音乐审美/);
+  assert.match(musicBody.messages[0].content, /音乐编排引擎/);
+  assert.match(musicBody.messages[0].content, /华语 独立/);
+  assert.deepEqual(body.response_format, { type: "json_object" });
+  assert.deepEqual(musicBody.response_format, { type: "json_object" });
+});
+
+test("openai provider falls back expression and keeps successful music queries", async () => {
+  const persona = {
+    id: "taste-dj",
+    name: "品味 DJ",
+    musicTaste: {
+      keywords: ["华语 独立", "中文 民谣"],
+      arrangementStyle: "真诚、不煽情",
+    },
+  };
+  const ai = createAiProvider({
+    provider: "openai",
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    apiStyle: "chat",
+    fetch: async (url, options) => {
+      const body = JSON.parse(options.body);
+      if (!/音乐编排引擎/.test(body.messages[0].content)) {
+        return {
+          ok: false,
+          status: 502,
+          text: async () => "expression down",
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                searchQueries: ["华语 独立", "中文 民谣"],
+                avoidRules: ["避开吵闹"],
+              }),
+            },
+          }],
+        }),
+      };
+    },
+  });
+
+  const plan = await ai.plan({ text: "有点累，别太吵", currentTrack: {}, context: {}, persona });
+
+  assert.equal(plan.status, "fallback");
+  assert.match(plan.reply, /品味 DJ/);
+  assert.deepEqual(plan.searchQueries, ["华语 独立", "中文 民谣"]);
+  assert.match(plan.error, /expression/);
+});
+
+test("openai provider keeps expression and falls back music queries to persona taste", async () => {
+  const persona = {
+    id: "taste-dj",
+    name: "品味 DJ",
+    musicTaste: {
+      keywords: ["华语 独立", "中文 民谣"],
+      arrangementStyle: "真诚、不煽情",
+    },
+  };
+  const ai = createAiProvider({
+    provider: "openai",
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    apiStyle: "chat",
+    fetch: async (url, options) => {
+      const body = JSON.parse(options.body);
+      if (/音乐编排引擎/.test(body.messages[0].content)) {
+        return {
+          ok: false,
+          status: 504,
+          text: async () => "music down",
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                reply: "先说结论：别上强刺激。",
+                queueChanged: true,
+                musicIntent: "refresh_queue",
+                mood: "低刺激",
+                djDirection: "先降噪",
+                hostQuestion: "",
+                trackIntro: "",
+                persona: "taste-dj",
+              }),
+            },
+          }],
+        }),
+      };
+    },
+  });
+
+  const plan = await ai.plan({ text: "有点累，别太吵", currentTrack: {}, context: {}, persona });
+
+  assert.equal(plan.status, "fallback");
+  assert.equal(plan.reply, "先说结论：别上强刺激。");
+  assert.deepEqual(plan.searchQueries, ["华语 独立", "中文 民谣", "真诚、不煽情"]);
+  assert.match(plan.error, /music/);
 });
 
 test("openai provider includes upstream error body when falling back", async () => {
