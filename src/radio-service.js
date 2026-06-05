@@ -407,7 +407,7 @@ function buildState(localState, aiPlan, channel, text) {
     },
     djLine: aiPlan.reply || aiPlan.djText,
     reason: aiPlan.whyThisSong,
-    next: aiPlan.hostQuestion || `我会继续听你的状态调整下一首。`,
+    next: aiPlan.hostQuestion || "",
   };
 }
 
@@ -588,9 +588,9 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
         },
         persona,
       });
-      const reply = aiPlan.reply || aiPlan.djText || "我在，刚才那一下先轻轻带过去，歌单不打断。";
+      const reply = aiPlan.status === "fallback" ? "" : String(aiPlan.reply || aiPlan.djText || "").trim();
       const conversation = (Array.isArray(payload.conversation) ? payload.conversation.slice(-17) : []);
-      conversation.push({ role: "dj", text: reply });
+      if (reply) conversation.push({ role: "dj", text: reply });
       const state = buildState(localState, {
         ...aiPlan,
         musicIntent: "chat_only",
@@ -643,12 +643,99 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
     };
   }
 
+  async function buildOpening(payload = {}) {
+    const text = String(payload.text || "").trim() || "Generate one short opening line for the current DJ persona. Do not recommend songs, do not explain technical details, and do not change the queue.";
+    const channel = findChannel(payload.channel || payload.channelId || payload.channelLabel || "");
+    const persona = resolvePersona(personaRegistry, payload.personaId);
+    const localState = { ...getInitialState(), ...(payload.state || {}) };
+    const existingQueue = normalizeExistingQueue(payload, musicProvider);
+    const payloadCurrentTrack = payload.currentTrack && !(usesRemoteCatalog(musicProvider) && isLocalLibraryTrack(payload.currentTrack))
+      ? payload.currentTrack
+      : null;
+    const currentTrack = payloadCurrentTrack
+      ? enrichTrack(payloadCurrentTrack, musicProvider, 0)
+      : existingQueue[0] || null;
+    const aiPlan = await aiProvider.plan({
+      text,
+      currentTrack,
+      context: {
+        channel: channel.label || localState.signal.channel,
+        source: "opening",
+        strategy: "Generate exactly one persona-style opening line. Do not change queue or playback.",
+        likedTitles: localState.likedTitles || [],
+        conversation: [],
+        queue: existingQueue.slice(0, 8),
+        responseMode: "opening",
+      },
+      persona,
+    });
+    const reply = aiPlan.status === "fallback"
+      ? ""
+      : String(aiPlan.reply || aiPlan.djText || "").trim();
+    const conversation = reply ? [{ role: "dj", text: reply }] : [];
+
+    return {
+      ai: {
+        provider: aiPlan.provider,
+        status: aiPlan.status,
+        error: aiPlan.error || "",
+      },
+      music: {
+        provider: musicProvider.name,
+        authorized: Boolean(musicProvider.authorized),
+      },
+      playback: payload.playback || { mode: "idle", reason: "" },
+      currentTrack,
+      track: currentTrack,
+      queue: existingQueue,
+      queueChanged: false,
+      intent: "opening",
+      searchQueries: [],
+      conversation,
+      channel: {
+        id: channel.id,
+        label: aiPlan.mood || aiPlan.moodChannel || channel.label,
+        description: channel.description,
+      },
+      dj: {
+        text: reply,
+        reason: "",
+        question: "",
+        strategy: aiPlan.djDirection || aiPlan.strategy || "",
+        trackIntro: "",
+        persona: persona ? {
+          id: persona.id,
+          name: persona.name,
+          description: persona.description || "",
+        } : null,
+      },
+      state: {
+        ...localState,
+        signal: {
+          ...localState.signal,
+          channel: aiPlan.mood || aiPlan.moodChannel || channel.label || localState.signal.channel,
+          source: localState.signal.source,
+          strategy: aiPlan.djDirection || aiPlan.strategy || localState.signal.strategy,
+        },
+        djLine: reply,
+        reason: "",
+        next: "",
+      },
+      ui: {
+        statusText: aiStatusText(aiPlan),
+        platformText: platformText(musicProvider),
+        playbackText: payload.playback ? playbackText(payload.playback) : "",
+      },
+    };
+  }
+
   return {
     plan(payload = {}) {
       return buildPlan(payload, { forceQueueChange: true });
     },
 
     chat(payload = {}) {
+      if (payload.responseMode === "opening") return buildOpening(payload);
       if (payload.responseMode === "aside") return buildAside(payload);
       return buildPlan(payload);
     },

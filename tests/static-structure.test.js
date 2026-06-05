@@ -113,3 +113,23 @@ test("frontend uses a separate tts voice player for dj speech", () => {
   assert.match(app, /enqueueDjVoice\(introText, \{ reason: "trackIntro" \}\)/);
   assert.doesNotMatch(app, /ui\.audio\.src = result\.audioUrl/);
 });
+
+test("frontend asks backend for persona opening copy instead of hardcoded dj banter", () => {
+  const html = fs.readFileSync(webIndexPath, "utf8");
+  const app = fs.readFileSync(webAppPath, "utf8");
+
+  assert.match(app, /async function requestOpeningLine\(\)/);
+  assert.match(app, /responseMode: "opening"/);
+  assert.match(app, /requestOpeningLine\(\)\.catch\(\(\) => \{\}\)/);
+  assert.match(app, /const messages = conversation;/);
+  assert.doesNotMatch(app, /晚上好，我在/);
+  assert.doesNotMatch(app, /现在开始放/);
+  assert.doesNotMatch(app, /我把队列切到/);
+  assert.doesNotMatch(app, /下一首会继续按你刚才的状态往下走/);
+  assert.doesNotMatch(app, /这组歌单已经播完了。/);
+  assert.doesNotMatch(app, /我这边刚刚没接上后端/);
+  assert.doesNotMatch(app, /我继续放着/);
+  assert.doesNotMatch(app, /暂停也可以/);
+  assert.doesNotMatch(html, /月亮 DJ · 0:05/);
+  assert.doesNotMatch(html, /这首适合放在你刚开始整理思绪的时候/);
+});

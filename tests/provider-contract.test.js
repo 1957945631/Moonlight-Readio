@@ -1609,6 +1609,102 @@ test("radio service aside mode appends persona reply without changing queue", as
   assert.equal(searchCalls, 0);
 });
 
+test("radio service opening mode returns one persona reply without touching playback or queue", async () => {
+  const queue = [
+    { id: "ncm:old-1", title: "Old Song 1", artist: "Old Artist" },
+  ];
+  const registry = new Map([["opening-dj", {
+    id: "opening-dj",
+    name: "Opening DJ",
+    description: "Direct opening host",
+  }]]);
+  let receivedInput;
+  let playbackCalls = 0;
+  let searchCalls = 0;
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan(input) {
+        receivedInput = input;
+        return {
+          provider: "mock",
+          status: "ready",
+          reply: "Opening DJ: one generated hello.",
+          djText: "Opening DJ: one generated hello.",
+          mood: "Private radio",
+          djDirection: "Open only",
+          searchQueries: ["should not search"],
+          queueChanged: true,
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        searchCalls += 1;
+        return [];
+      },
+      async getPlaybackSource() {
+        playbackCalls += 1;
+        return { mode: "stream", url: "https://audio.example/song.mp3", reason: "playable" };
+      },
+    },
+    personaRegistry: registry,
+  });
+
+  const result = await radio.chat({
+    responseMode: "opening",
+    personaId: "opening-dj",
+    conversation: [],
+    queue,
+    currentTrack: queue[0],
+  });
+
+  assert.equal(receivedInput.persona.id, "opening-dj");
+  assert.equal(receivedInput.context.responseMode, "opening");
+  assert.equal(result.queueChanged, false);
+  assert.equal(result.currentTrack.id, "ncm:old-1");
+  assert.deepEqual(result.queue.map((track) => track.id), ["ncm:old-1"]);
+  assert.deepEqual(result.conversation, [{ role: "dj", text: "Opening DJ: one generated hello." }]);
+  assert.equal(result.dj.text, "Opening DJ: one generated hello.");
+  assert.equal(result.searchQueries.length, 0);
+  assert.equal(playbackCalls, 0);
+  assert.equal(searchCalls, 0);
+});
+
+test("radio service opening mode stays empty when ai falls back", async () => {
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan() {
+        return {
+          provider: "mock",
+          status: "fallback",
+          reply: "Local fallback copy should not be shown.",
+          djText: "Local fallback copy should not be shown.",
+        };
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        throw new Error("should not search");
+      },
+      async getPlaybackSource() {
+        throw new Error("should not resolve playback");
+      },
+    },
+  });
+
+  const result = await radio.chat({ responseMode: "opening", conversation: [] });
+
+  assert.equal(result.queueChanged, false);
+  assert.deepEqual(result.conversation, []);
+  assert.equal(result.dj.text, "");
+});
+
 test("radio service can collect fifteen playable tracks", async () => {
   const radio = createRadioService({
     aiProvider: {

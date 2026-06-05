@@ -209,6 +209,7 @@
             ai: status.ai.provider === "openai" && status.ai.configured ? "AI 已连接" : "AI 模拟中",
             music: musicText,
           });
+          requestOpeningLine().catch(() => {});
         } catch {
           setStatuses({ ai: "本地规则", music: "后端未连接", playback: "模拟播放" });
         }
@@ -364,9 +365,7 @@
 
       function renderConversation() {
         const djName = getDjName();
-        const messages = conversation.length ? conversation : [
-          { role: "dj", text: "晚上好，我在。你可以直接和我说今天发生了什么、想避开什么声音，或者点左边频道让我先帮你开一段。" },
-        ];
+        const messages = conversation;
         ui.djCard.innerHTML = `
           <div class="dj-section-label">${html(djName)}</div>
           <div class="dj-history">
@@ -379,23 +378,13 @@
         if (history) history.scrollTop = history.scrollHeight;
       }
 
-      function describeTrackForDj(track) {
-        if (track && track.trackIntro) return track.trackIntro;
-        const title = track.title || "这首歌";
-        const artist = track.artist || "这位音乐人";
-        const mood = track.mood || track.channelShort || channel.label || "当前频道";
-        const source = track.sourceLabel || "当前歌单";
-        const reason = track.reason || state.reason || "它和你刚才给我的状态比较贴近，能把节奏放稳，不会突然把情绪推得太满。";
-        const duration = track.duration ? `，时长 ${track.duration}` : "";
-        return `现在开始放《${title}》。这首来自 ${artist}${duration}，我把它放在「${mood}」这一段里。${reason} 如果你愿意，可以边听边告诉我它给你的感觉，我会继续顺着你的状态往下排。`;
-      }
-
       function introduceCurrentTrack() {
         if (!currentTrack || !currentTrack.title) return;
         const introKey = currentTrack.id || `${currentTrack.title}-${currentTrack.artist}`;
         if (introKey && introKey === lastIntroducedTrackId) return;
+        const introText = String(currentTrack.trackIntro || "").trim();
+        if (!introText) return;
         lastIntroducedTrackId = introKey;
-        const introText = describeTrackForDj(currentTrack);
         conversation.push({
           role: "dj",
           text: introText,
@@ -404,7 +393,7 @@
         saveConversation();
         renderConversation();
         ui.reasonCopy.textContent = currentTrack.reason || state.reason || ui.reasonCopy.textContent;
-        ui.nextCopy.textContent = currentTrack.next || "我会听着这首的走向，继续把下一首接得自然一点。";
+        ui.nextCopy.textContent = currentTrack.next || ui.nextCopy.textContent;
       }
 
       function renderSignal() {
@@ -662,8 +651,8 @@
         const nextIndex = (index + queue.length) % queue.length;
         setCurrentTrack(queue[nextIndex], nextIndex);
         rememberTrack(currentTrack);
-        ui.reasonCopy.textContent = `我把队列切到《${currentTrack.title}》。如果它没有版权或音源，我会直接告诉你。`;
-        ui.nextCopy.textContent = "下一首会继续按你刚才的状态往下走。";
+        ui.reasonCopy.textContent = currentTrack.reason || state.reason || "";
+        ui.nextCopy.textContent = currentTrack.next || state.next || "";
         if (shouldPlay) {
           playingNow = true;
           await playCurrent();
@@ -679,12 +668,6 @@
           if (nextIndex >= queue.length) {
             playingNow = false;
             setStatuses({ playback: "这组歌单已经播完了" });
-            conversation.push({
-              role: "dj",
-              text: "这组歌单已经播完了。我先把声音收住，你想继续安静一点，还是换个更有陪伴感的方向？",
-            });
-            saveConversation();
-            renderConversation();
             renderPlayer();
             return;
           }
@@ -735,7 +718,7 @@
             : `你说：“${userText}”。${djName} 先陪你聊，歌单不打断。`
           : `当前频道：${channel.label || state.signal.channel}`;
         ui.reasonCopy.textContent = state.reason || (result.dj && result.dj.reason) || "";
-        ui.nextCopy.textContent = state.next || "我会继续听你的状态调整下一首。";
+        ui.nextCopy.textContent = state.next || "";
         setStatuses({
           ai: result.ui && result.ui.statusText,
           music: result.ui && result.ui.platformText,
@@ -788,7 +771,7 @@
           await applyRadioResult(await response.json(), text);
         } catch (error) {
           console.error("Moonlight chat request failed", error);
-          conversation.push({ role: "user", text }, { role: "dj", text: "我这边刚刚没接上后端，但我还在。歌先不动，你继续说。" });
+          conversation.push({ role: "user", text });
           saveConversation();
           setStatuses({ ai: "后端请求失败，本地规则回退" });
           setStatuses({ playback: `请求后端失败：${error.message || "unknown error"}` });
@@ -800,6 +783,31 @@
           ui.sendBtn.disabled = false;
           ui.sendBtn.textContent = "发送给 DJ";
         }
+      }
+
+      async function requestOpeningLine() {
+        if (conversation.length) return;
+        const response = await fetch(`${apiBase}/api/radio/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            responseMode: "opening",
+            text: "",
+            channel: channel.id,
+            personaId,
+            conversation: [],
+            queue,
+            currentTrack,
+            state: {
+              current: currentIndex,
+              likedTitles: state.likedTitles,
+              lastInput: state.lastInput,
+            },
+          }),
+        });
+        if (!response.ok) throw new Error(`opening failed ${response.status}`);
+        if (conversation.length) return;
+        await applyRadioResult(await response.json(), "");
       }
 
       async function tuneChannel(nextChannel) {
@@ -886,8 +894,6 @@
         playingNow = !playingNow;
         if (playingNow) await playCurrent();
         else await stopPlayback();
-        conversation.push({ role: "dj", text: playingNow ? "我继续放着，你慢慢听。" : "暂停也可以。我在这里等你。" });
-        saveConversation();
         renderConversation();
         renderPlayer();
       });
