@@ -24,6 +24,8 @@ AI_PROVIDER=openai
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_MODEL=deepseek-chat
 OPENAI_API_STYLE=chat
+TTS_PROVIDER=juhe
+JUHE_TTS_LANGUAGE=zh
 MUSIC_PROVIDER=netease
 NETEASE_API_BASE=https://api-enhanced-umber-ten.vercel.app
 NETEASE_REAL_IP=116.25.146.177
@@ -36,6 +38,7 @@ Set this in Cloudflare Dashboard only:
 
 ```text
 OPENAI_API_KEY=<DeepSeek API key>
+JUHE_TTS_KEY=<Juhe TTS key>
 ```
 
 Path:
@@ -65,6 +68,7 @@ Expected shape:
 ```json
 {
   "ai": { "provider": "openai", "configured": true },
+  "tts": { "provider": "juhe", "configured": true, "enabled": true },
   "music": {
     "provider": "netease",
     "configured": true,

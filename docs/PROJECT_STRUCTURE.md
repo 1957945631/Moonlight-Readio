@@ -11,8 +11,10 @@ Browser UI
       -> src/radio-service.js
         -> src/providers/ai-provider.js
         -> src/providers/music-provider.js
+        -> src/providers/tts-provider.js
           -> Vercel NetEase API (cloud)
           -> ncm-cli + mpv (local only)
+          -> Juhe TTS API
 ```
 
 Cloudflare 部署：
@@ -46,6 +48,7 @@ server.js
 | `src/radio-service.js` | Intent detection, DJ plan orchestration, queue generation, playable filtering. |
 | `src/providers/ai-provider.js` | Mock and OpenAI-compatible AI provider. |
 | `src/providers/music-provider.js` | Local, NetEase API, and NetEase CLI providers. |
+| `src/providers/tts-provider.js` | Juhe TTS provider for DJ speech audio URLs. |
 | `worker/index.js` | Cloudflare Worker entry. |
 | `server.js` | Local Node server entry. |
 | `tests/` | Plain Node tests. |
@@ -65,6 +68,7 @@ server.js
 | Task | Files |
 | --- | --- |
 | AI provider or model | `wrangler.jsonc`, `.env.example`, `src/providers/ai-provider.js` |
+| TTS provider or voice | `wrangler.jsonc`, `.env.example`, `src/providers/tts-provider.js`, `web/app.js` |
 | Music source behavior | `src/providers/music-provider.js`, `src/radio-service.js` |
 | Queue or chat behavior | `src/radio-service.js`, `tests/provider-contract.test.js` |
 | Frontend playback controls | `web/app.js`, `docs/FRONTEND_INTERACTIONS.md` |

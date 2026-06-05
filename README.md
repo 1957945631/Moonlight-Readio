@@ -59,6 +59,14 @@ OPENAI_API_STYLE=chat
 OPENAI_MODEL=deepseek-chat
 ```
 
+TTS with Juhe:
+```env
+TTS_PROVIDER=juhe
+JUHE_TTS_KEY=your Juhe TTS key
+JUHE_TTS_LANGUAGE=zh
+JUHE_TTS_VOICE=
+```
+
 本地使用网易云 API：
 
 ```env
@@ -81,6 +89,8 @@ NETEASE_AUDIO_LEVEL=standard
     "OPENAI_BASE_URL": "https://api.deepseek.com",
     "OPENAI_MODEL": "deepseek-chat",
     "OPENAI_API_STYLE": "chat",
+    "TTS_PROVIDER": "juhe",
+    "JUHE_TTS_LANGUAGE": "zh",
     "MUSIC_PROVIDER": "netease",
     "NETEASE_API_BASE": "https://api-enhanced-umber-ten.vercel.app",
     "NETEASE_REAL_IP": "116.25.146.177",
@@ -93,6 +103,7 @@ DeepSeek key 只填到 Cloudflare Secret：
 
 ```text
 OPENAI_API_KEY
+JUHE_TTS_KEY
 ```
 
 Cloudflare 控制台路径：`Workers 和 Pages` -> `moonlightdio` -> `设置` -> `变量和机密` -> 编辑 `OPENAI_API_KEY`。

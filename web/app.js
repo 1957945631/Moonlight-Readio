@@ -31,6 +31,7 @@
         volumeValue: byId("volumeValue"),
         personaSwitch: byId("personaSwitch"),
         audio: byId("audioPlayer"),
+        voice: byId("voicePlayer"),
         aiStatus: byId("aiStatus"),
         musicStatus: byId("musicStatus"),
         playbackStatus: byId("playbackStatus"),
@@ -105,6 +106,8 @@
       let lastIntroducedTrackId = "";
       let autoAdvancing = false;
       let consecutivePlaybackFailures = 0;
+      const voiceQueue = [];
+      let voicePlaying = false;
 
       function normalizePersonaStorageId(value) {
         const id = String(value || "").trim();
@@ -262,6 +265,54 @@
         if (values.playback) ui.playbackStatus.textContent = values.playback;
       }
 
+      function duckMusicForVoice() {
+        if (playback.mode !== "stream") return;
+        ui.audio.volume = clamp(Math.round(volumeNow * 0.35), 0, 100) / 100;
+      }
+
+      function restoreMusicAfterVoice() {
+        if (playback.mode !== "stream") return;
+        ui.audio.volume = volumeNow / 100;
+      }
+
+      function finishCurrentVoice() {
+        if (!voicePlaying) return;
+        voicePlaying = false;
+        restoreMusicAfterVoice();
+        playNextDjVoice();
+      }
+
+      async function playNextDjVoice() {
+        if (voicePlaying || !voiceQueue.length) return;
+        const item = voiceQueue.shift();
+        voicePlaying = true;
+        try {
+          const response = await fetch(`${apiBase}/api/tts/speak`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: item.text,
+              personaId,
+            }),
+          });
+          if (!response.ok) throw new Error(`tts failed ${response.status}`);
+          const result = await response.json();
+          if (!result.ok || !result.audioUrl) throw new Error(result.reason || "tts unavailable");
+          ui.voice.src = result.audioUrl;
+          duckMusicForVoice();
+          await ui.voice.play();
+        } catch {
+          finishCurrentVoice();
+        }
+      }
+
+      function enqueueDjVoice(text, options = {}) {
+        const cleanText = String(text || "").trim();
+        if (!cleanText || !ui.voice) return;
+        voiceQueue.push({ text: cleanText, reason: options.reason || "" });
+        playNextDjVoice();
+      }
+
       function renderPlayer() {
         const displayTrack = currentTrack || { title: "等待真实音源", artist: "Moonlight", sourceLabel: "网易云候选", duration: "--", durationSeconds: 1 };
         const total = displayTrack.durationSeconds || secondsFromDuration(displayTrack.duration) || 1;
@@ -293,7 +344,7 @@
             body: JSON.stringify({ volume: volumeNow }),
           }).catch(() => {});
         }
-        ui.audio.volume = volumeNow / 100;
+        ui.audio.volume = voicePlaying ? clamp(Math.round(volumeNow * 0.35), 0, 100) / 100 : volumeNow / 100;
       }
 
       function renderQueue() {
@@ -344,10 +395,12 @@
         const introKey = currentTrack.id || `${currentTrack.title}-${currentTrack.artist}`;
         if (introKey && introKey === lastIntroducedTrackId) return;
         lastIntroducedTrackId = introKey;
+        const introText = describeTrackForDj(currentTrack);
         conversation.push({
           role: "dj",
-          text: describeTrackForDj(currentTrack),
+          text: introText,
         });
+        enqueueDjVoice(introText, { reason: "trackIntro" });
         saveConversation();
         renderConversation();
         ui.reasonCopy.textContent = currentTrack.reason || state.reason || ui.reasonCopy.textContent;
@@ -516,7 +569,11 @@
         if (!response.ok) throw new Error(`aside failed ${response.status}`);
         const result = await response.json();
         if (Array.isArray(result.conversation)) {
+          const previousConversationLength = conversation.length;
           conversation = result.conversation;
+          conversation.slice(previousConversationLength)
+            .filter((message) => message && message.role === "dj")
+            .forEach((message) => enqueueDjVoice(message.text, { reason: "conversation" }));
           saveConversation();
           renderConversation();
         }
@@ -541,7 +598,7 @@
         if (playback.mode === "stream") {
           const streamUrl = new URL(playback.url, location.href).href;
           if (ui.audio.src !== streamUrl) ui.audio.src = playback.url;
-          ui.audio.volume = volumeNow / 100;
+          ui.audio.volume = voicePlaying ? clamp(Math.round(volumeNow * 0.35), 0, 100) / 100 : volumeNow / 100;
           await ui.audio.play().then(() => {
             playingNow = true;
             consecutivePlaybackFailures = 0;
@@ -640,6 +697,7 @@
 
       async function applyRadioResult(result, userText) {
         if (!result || !result.state) return;
+        const previousConversationLength = conversation.length;
         state = result.state;
         channel = result.channel || channel;
         if (result.dj && result.dj.persona && result.dj.persona.id) {
@@ -667,6 +725,9 @@
           elapsedNow = 0;
         }
         conversation = Array.isArray(result.conversation) ? result.conversation : conversation;
+        conversation.slice(previousConversationLength)
+          .filter((message) => message && message.role === "dj")
+          .forEach((message) => enqueueDjVoice(message.text, { reason: "conversation" }));
         saveConversation();
         ui.moodCard.textContent = userText
           ? queueChanged
@@ -859,6 +920,8 @@
         elapsedNow = Math.floor(ui.audio.currentTime || 0);
         renderPlayer();
       });
+      ui.voice.addEventListener("ended", finishCurrentVoice);
+      ui.voice.addEventListener("error", finishCurrentVoice);
       document.querySelectorAll(".schedule-item").forEach((item, index) => {
         item.addEventListener("click", () => tuneChannel(scheduleChannels[index]));
       });

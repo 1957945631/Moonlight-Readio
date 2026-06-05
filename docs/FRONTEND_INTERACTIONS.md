@@ -8,6 +8,7 @@ This document records the current frontend playback behavior and the regressions
 - Do not add a second event-binding block for the same DOM controls.
 - The right panel queue is not just display; clicking a row must select that track and resolve its playback source.
 - Cloud stream playback uses `<audio id="audioPlayer">` directly.
+- DJ speech uses a separate `<audio id="voicePlayer">`; do not reuse the music player for TTS.
 - External links are only a fallback when the backend cannot provide `stream` or `cli`.
 - DJ persona uses the existing radio APIs. Frontend reads `dj.personas` from `/api/status` and sends `personaId` in `/api/radio/plan`, `/api/radio/chat`, and `/api/radio/channel`.
 - Persona selection is stored in `localStorage` as `moonlight-dj-persona`. If the saved id is not present in `/api/status`, the frontend clears it and falls back to the base DJ experience.
@@ -36,6 +37,17 @@ persona switch click
   -> next radio request carries personaId
   -> result.dj.persona
   -> frontend syncs selected persona
+```
+
+DJ speech flow:
+
+```text
+new DJ conversation message or trackIntro
+  -> enqueueDjVoice()
+  -> POST /api/tts/speak with text and personaId
+  -> result.audioUrl -> voicePlayer.play()
+  -> duck audioPlayer volume to about 35%
+  -> restore audioPlayer volume on voice ended/error
 ```
 
 Queue click / previous / next:

@@ -1,7 +1,8 @@
 const { createAiProvider } = require("./providers/ai-provider.js");
 const { createMusicProvider } = require("./providers/music-provider.js");
+const { createTtsProvider } = require("./providers/tts-provider.js");
 const { createRadioService } = require("./radio-service.js");
-const { loadPersonas, listPersonas } = require("./dj/persona-registry.js");
+const { loadPersonas, listPersonas, resolvePersona } = require("./dj/persona-registry.js");
 
 function getEnv(env, key) {
   if (env && Object.prototype.hasOwnProperty.call(env, key)) return env[key];
@@ -20,11 +21,17 @@ function createApiServices(env = {}, options = {}) {
     provider: getEnv(env, "MUSIC_PROVIDER") || "netease",
     fetch: options.musicFetch,
   });
+  const ttsProvider = createTtsProvider({
+    env,
+    provider: getEnv(env, "TTS_PROVIDER") || (getEnv(env, "JUHE_TTS_KEY") ? "juhe" : "none"),
+    fetch: options.ttsFetch,
+  });
   const personaRegistry = options.personaRegistry || loadPersonas(options.personaDir);
   return {
     env,
     aiProvider,
     musicProvider,
+    ttsProvider,
     personaRegistry,
     radio: createRadioService({ aiProvider, musicProvider, personaRegistry }),
   };
@@ -53,7 +60,7 @@ async function handleApiRequest(request, services) {
   if (!url.pathname.startsWith("/api/")) return null;
   if (request.method === "OPTIONS") return sendJson(204, {});
 
-  const { env, aiProvider, musicProvider, personaRegistry, radio } = services;
+  const { env, aiProvider, musicProvider, ttsProvider, personaRegistry, radio } = services;
   try {
     if (request.method === "GET" && url.pathname === "/api/status") {
       const musicStatus = typeof musicProvider.checkStatus === "function"
@@ -75,6 +82,11 @@ async function handleApiRequest(request, services) {
           supportsPlaybackUrl: musicStatus.supportsPlaybackUrl,
           message: musicStatus.message,
         },
+        tts: {
+          provider: ttsProvider.name,
+          configured: Boolean(ttsProvider.configured),
+          enabled: Boolean(ttsProvider.enabled),
+        },
         dj: {
           personas: listPersonas(personaRegistry),
         },
@@ -95,6 +107,16 @@ async function handleApiRequest(request, services) {
 
     if (request.method === "POST" && url.pathname === "/api/radio/channel") {
       return sendJson(200, await radio.channel(await readJson(request)));
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/tts/speak") {
+      const body = await readJson(request);
+      const persona = resolvePersona(personaRegistry, body.personaId);
+      const personaVoice = persona && persona.voice && persona.voice.ttsVoice;
+      return sendJson(200, await ttsProvider.speak({
+        text: body.text,
+        voice: body.voice || personaVoice,
+      }));
     }
 
     if (request.method === "GET" && url.pathname === "/api/music/state") {

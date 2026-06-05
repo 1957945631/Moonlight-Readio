@@ -22,6 +22,8 @@ test("api handler reports status using env-backed providers", async () => {
     AI_PROVIDER: "mock",
     MUSIC_PROVIDER: "netease",
     NETEASE_API_BASE: "https://api.example.test",
+    TTS_PROVIDER: "juhe",
+    JUHE_TTS_KEY: "tts-secret",
   }, {
     personaRegistry,
     musicFetch: async (url) => ({
@@ -46,11 +48,81 @@ test("api handler reports status using env-backed providers", async () => {
   assert.equal(body.music.loggedIn, false);
   assert.equal(body.music.supportsSearch, true);
   assert.equal(body.music.supportsPlaybackUrl, false);
+  assert.deepEqual(body.tts, {
+    provider: "juhe",
+    configured: true,
+    enabled: true,
+  });
   assert.deepEqual(body.dj.personas, [{
     id: "test-dj",
     name: "测试 DJ",
     description: "测试人格",
   }]);
+});
+
+test("api handler can synthesize dj speech through tts route", async () => {
+  let requestedBody = "";
+  const personaRegistry = new Map([["test-dj", {
+    id: "test-dj",
+    name: "Test DJ",
+    description: "Test persona",
+    voice: { ttsVoice: "persona-voice" },
+  }]]);
+  const services = createApiServices({
+    AI_PROVIDER: "mock",
+    MUSIC_PROVIDER: "local",
+    TTS_PROVIDER: "juhe",
+    JUHE_TTS_KEY: "tts-secret",
+  }, {
+    personaRegistry,
+    ttsFetch: async (url, options) => {
+      requestedBody = String(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          error_code: 0,
+          result: { audio_url: "https://audio.example/dj.mp3" },
+        }),
+      };
+    },
+  });
+
+  const response = await handleApiRequest(new Request("https://moonlight.test/api/tts/speak", {
+    method: "POST",
+    body: JSON.stringify({ text: "hello", personaId: "test-dj" }),
+  }), services);
+  const body = await response.json();
+  const form = new URLSearchParams(requestedBody);
+
+  assert.equal(response.status, 200);
+  assert.equal(form.get("voice"), "persona-voice");
+  assert.deepEqual(body, {
+    ok: true,
+    provider: "juhe",
+    audioUrl: "https://audio.example/dj.mp3",
+    voice: "persona-voice",
+    expiresInHours: 24,
+  });
+});
+
+test("api handler returns structured tts failure when key is missing", async () => {
+  const services = createApiServices({
+    AI_PROVIDER: "mock",
+    MUSIC_PROVIDER: "local",
+    TTS_PROVIDER: "juhe",
+    JUHE_TTS_KEY: "",
+  });
+
+  const response = await handleApiRequest(new Request("https://moonlight.test/api/tts/speak", {
+    method: "POST",
+    body: JSON.stringify({ text: "hello" }),
+  }), services);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, false);
+  assert.equal(body.provider, "juhe");
+  assert.match(body.reason, /not configured/);
 });
 
 test("api handler returns null for non-api routes", async () => {

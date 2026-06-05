@@ -94,3 +94,22 @@ test("frontend exposes persistent dj persona selection", () => {
   assert.match(app, /function setPersona\(nextPersonaId\)/);
   assert.equal(fs.existsSync(path.join(root, "src", "dj", "personas.js")), false);
 });
+
+test("frontend uses a separate tts voice player for dj speech", () => {
+  const html = fs.readFileSync(webIndexPath, "utf8");
+  const app = fs.readFileSync(webAppPath, "utf8");
+
+  assert.match(html, /<audio id="voicePlayer" preload="none"><\/audio>/);
+  assert.match(app, /voice: byId\("voicePlayer"\)/);
+  assert.match(app, /const voiceQueue = \[\]/);
+  assert.match(app, /function enqueueDjVoice\(text, options = \{\}\)/);
+  assert.match(app, /fetch\(`\$\{apiBase\}\/api\/tts\/speak`/);
+  assert.match(app, /ui\.voice\.src = result\.audioUrl/);
+  assert.match(app, /function duckMusicForVoice\(\)/);
+  assert.match(app, /function restoreMusicAfterVoice\(\)/);
+  assert.match(app, /function finishCurrentVoice\(\) \{\s+if \(!voicePlaying\) return;\s+voicePlaying = false;\s+restoreMusicAfterVoice\(\);/);
+  assert.match(app, /Math\.round\(volumeNow \* 0\.35\)/);
+  assert.match(app, /enqueueDjVoice\(message\.text, \{ reason: "conversation" \}\)/);
+  assert.match(app, /enqueueDjVoice\(introText, \{ reason: "trackIntro" \}\)/);
+  assert.doesNotMatch(app, /ui\.audio\.src = result\.audioUrl/);
+});

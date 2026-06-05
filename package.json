@@ -9,7 +9,7 @@
     "ncm:login": "ncm-cli login",
     "ncm:tui": "ncm-cli tui",
     "start": "node server.js",
-    "test": "node tests/moonlight-core.test.js && node tests/provider-contract.test.js && node tests/api-handler.test.js && node tests/static-structure.test.js"
+    "test": "node tests/moonlight-core.test.js && node tests/provider-contract.test.js && node tests/tts-provider.test.js && node tests/api-handler.test.js && node tests/static-structure.test.js"
   },
   "dependencies": {
     "@music163/ncm-cli": "^0.1.5"

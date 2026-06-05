@@ -22,6 +22,8 @@ AI_PROVIDER=openai
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_MODEL=deepseek-chat
 OPENAI_API_STYLE=chat
+TTS_PROVIDER=juhe
+JUHE_TTS_LANGUAGE=zh
 MUSIC_PROVIDER=netease
 NETEASE_API_BASE=https://api-enhanced-umber-ten.vercel.app
 NETEASE_REAL_IP=116.25.146.177
@@ -32,6 +34,7 @@ NETEASE_AUDIO_LEVEL=standard
 
 ```text
 OPENAI_API_KEY
+JUHE_TTS_KEY
 ```
 
 不要把 API key、Cookie、token、PrivateKey 写进 Git。
@@ -48,6 +51,7 @@ src/api-handler.js          /api 路由分发
 src/radio-service.js        意图判断、队列生成、DJ 回复、可播放过滤
 src/providers/ai-provider.js
 src/providers/music-provider.js
+src/providers/tts-provider.js
 server.js                   本地 Node HTTP 服务
 worker/index.js             Cloudflare Worker 入口
 wrangler.jsonc              Cloudflare 非敏感配置
