@@ -33,6 +33,29 @@ test("frontend assets live under web with external css and script files", () => 
   assert.doesNotMatch(html, /<script>\s*const API_BASE/);
 });
 
+test("frontend refreshes opening copy when switching persona before real chat", () => {
+  const app = fs.readFileSync(webAppPath, "utf8");
+
+  assert.match(app, /function canReplaceOpeningConversation\(\)/);
+  assert.match(app, /return !conversation\.some\(\(message\) => message && message\.role === "user"\)/);
+  assert.match(app, /conversation\.length <= 1/);
+  assert.match(app, /const previousPersonaId = personaId;/);
+  assert.match(app, /if \(personaId !== previousPersonaId && canReplaceOpeningConversation\(\)\)/);
+  assert.match(app, /conversation = \[\];/);
+  assert.match(app, /requestOpeningLine\(\{ replaceOpening: true \}\)\.catch\(\(\) => \{\}\)/);
+});
+
+test("frontend discards stale opening responses for previous persona", () => {
+  const app = fs.readFileSync(webAppPath, "utf8");
+
+  assert.match(app, /let openingRequestSeq = 0;/);
+  assert.match(app, /async function requestOpeningLine\(options = \{\}\)/);
+  assert.match(app, /const requestedPersonaId = personaId;/);
+  assert.match(app, /const requestSeq = \+\+openingRequestSeq;/);
+  assert.match(app, /personaId: requestedPersonaId,/);
+  assert.match(app, /if \(requestSeq !== openingRequestSeq \|\| requestedPersonaId !== personaId\) return;/);
+});
+
 test("server serves the web directory as the static app root", () => {
   const server = fs.readFileSync(path.join(root, "server.js"), "utf8");
   assert.match(server, /const WEB_ROOT = path\.join\(ROOT, "web"\);/);
@@ -118,7 +141,7 @@ test("frontend asks backend for persona opening copy instead of hardcoded dj ban
   const html = fs.readFileSync(webIndexPath, "utf8");
   const app = fs.readFileSync(webAppPath, "utf8");
 
-  assert.match(app, /async function requestOpeningLine\(\)/);
+  assert.match(app, /async function requestOpeningLine\(options = \{\}\)/);
   assert.match(app, /responseMode: "opening"/);
   assert.match(app, /requestOpeningLine\(\)\.catch\(\(\) => \{\}\)/);
   assert.match(app, /const messages = conversation;/);

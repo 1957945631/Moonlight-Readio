@@ -108,6 +108,7 @@
       let consecutivePlaybackFailures = 0;
       const voiceQueue = [];
       let voicePlaying = false;
+      let openingRequestSeq = 0;
 
       function normalizePersonaStorageId(value) {
         const id = String(value || "").trim();
@@ -140,6 +141,10 @@
 
       function saveConversation() {
         conversation = conversation.slice(-24);
+      }
+
+      function canReplaceOpeningConversation() {
+        return !conversation.some((message) => message && message.role === "user") && conversation.length <= 1;
       }
 
       function rememberTrack(track) {
@@ -435,12 +440,20 @@
       }
 
       function setPersona(nextPersonaId) {
+        const previousPersonaId = personaId;
         personaId = resolvePersonaId(nextPersonaId);
         currentPersona = personas.find((persona) => persona.id === personaId) || null;
         if (personaId) localStorage.setItem(PERSONA_KEY, personaId);
         else localStorage.removeItem(PERSONA_KEY);
         syncPersonaSwitch();
         renderDjStatus();
+        if (personaId !== previousPersonaId && canReplaceOpeningConversation()) {
+          conversation = [];
+          saveConversation();
+          renderConversation();
+          requestOpeningLine({ replaceOpening: true }).catch(() => {});
+          return;
+        }
         renderConversation();
       }
 
@@ -785,8 +798,11 @@
         }
       }
 
-      async function requestOpeningLine() {
-        if (conversation.length) return;
+      async function requestOpeningLine(options = {}) {
+        const replaceOpening = Boolean(options.replaceOpening);
+        if (replaceOpening ? !canReplaceOpeningConversation() : conversation.length) return;
+        const requestedPersonaId = personaId;
+        const requestSeq = ++openingRequestSeq;
         const response = await fetch(`${apiBase}/api/radio/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -794,7 +810,7 @@
             responseMode: "opening",
             text: "",
             channel: channel.id,
-            personaId,
+            personaId: requestedPersonaId,
             conversation: [],
             queue,
             currentTrack,
@@ -806,7 +822,8 @@
           }),
         });
         if (!response.ok) throw new Error(`opening failed ${response.status}`);
-        if (conversation.length) return;
+        if (requestSeq !== openingRequestSeq || requestedPersonaId !== personaId) return;
+        if (replaceOpening ? !canReplaceOpeningConversation() : conversation.length) return;
         await applyRadioResult(await response.json(), "");
       }
 
