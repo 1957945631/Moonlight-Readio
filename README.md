@@ -64,7 +64,7 @@ TTS with Juhe:
 TTS_PROVIDER=juhe
 JUHE_TTS_KEY=your Juhe TTS key
 JUHE_TTS_LANGUAGE=zh
-JUHE_TTS_VOICE=
+JUHE_TTS_VOICE=Marcus
 ```
 
 本地使用网易云 API：

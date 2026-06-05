@@ -23,6 +23,7 @@ OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_MODEL=deepseek-chat
 OPENAI_API_STYLE=chat
 TTS_PROVIDER=juhe
+JUHE_TTS_VOICE=Marcus
 JUHE_TTS_LANGUAGE=zh
 MUSIC_PROVIDER=netease
 NETEASE_API_BASE=https://api-enhanced-umber-ten.vercel.app
