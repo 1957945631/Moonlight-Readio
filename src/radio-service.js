@@ -411,6 +411,12 @@ function buildState(localState, aiPlan, channel, text) {
   };
 }
 
+function buildPersonaOpeningCopy(persona) {
+  if (persona && persona.openingLine) return String(persona.openingLine).trim();
+  const name = persona && persona.name ? persona.name : "月亮 DJ";
+  return `我是${name}，今天由我来为你推荐音乐。先把频道打开，声音放稳一点，这段我陪你慢慢听。`;
+}
+
 function resolveFinalIntent(aiPlan, text, changeQueue) {
   const aiIntent = aiPlan.musicIntent || aiPlan.intent || inferIntent(text);
   const localIntent = inferIntent(text);
@@ -644,7 +650,6 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
   }
 
   async function buildOpening(payload = {}) {
-    const text = String(payload.text || "").trim() || "Generate one short opening line for the current DJ persona. Do not recommend songs, do not explain technical details, and do not change the queue.";
     const channel = findChannel(payload.channel || payload.channelId || payload.channelLabel || "");
     const persona = resolvePersona(personaRegistry, payload.personaId);
     const localState = { ...getInitialState(), ...(payload.state || {}) };
@@ -655,30 +660,14 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
     const currentTrack = payloadCurrentTrack
       ? enrichTrack(payloadCurrentTrack, musicProvider, 0)
       : existingQueue[0] || null;
-    const aiPlan = await aiProvider.plan({
-      text,
-      currentTrack,
-      context: {
-        channel: channel.label || localState.signal.channel,
-        source: "opening",
-        strategy: "Generate exactly one persona-style opening line. Do not change queue or playback.",
-        likedTitles: localState.likedTitles || [],
-        conversation: [],
-        queue: existingQueue.slice(0, 8),
-        responseMode: "opening",
-      },
-      persona,
-    });
-    const reply = aiPlan.status === "fallback"
-      ? ""
-      : String(aiPlan.reply || aiPlan.djText || "").trim();
-    const conversation = reply ? [{ role: "dj", text: reply }] : [];
+    const reply = buildPersonaOpeningCopy(persona);
+    const conversation = [{ role: "dj", text: reply }];
 
     return {
       ai: {
-        provider: aiPlan.provider,
-        status: aiPlan.status,
-        error: aiPlan.error || "",
+        provider: aiProvider.name,
+        status: "static",
+        error: "",
       },
       music: {
         provider: musicProvider.name,
@@ -694,14 +683,14 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
       conversation,
       channel: {
         id: channel.id,
-        label: aiPlan.mood || aiPlan.moodChannel || channel.label,
+        label: channel.label,
         description: channel.description,
       },
       dj: {
         text: reply,
         reason: "",
         question: "",
-        strategy: aiPlan.djDirection || aiPlan.strategy || "",
+        strategy: "",
         trackIntro: "",
         persona: persona ? {
           id: persona.id,
@@ -713,16 +702,16 @@ function createRadioService({ aiProvider, musicProvider, personaRegistry }) {
         ...localState,
         signal: {
           ...localState.signal,
-          channel: aiPlan.mood || aiPlan.moodChannel || channel.label || localState.signal.channel,
+          channel: channel.label || localState.signal.channel,
           source: localState.signal.source,
-          strategy: aiPlan.djDirection || aiPlan.strategy || localState.signal.strategy,
+          strategy: localState.signal.strategy,
         },
         djLine: reply,
         reason: "",
         next: "",
       },
       ui: {
-        statusText: aiStatusText(aiPlan),
+        statusText: aiProvider.name === "openai" ? "AI 已连接" : "AI 模拟中",
         platformText: platformText(musicProvider),
         playbackText: payload.playback ? playbackText(payload.playback) : "",
       },

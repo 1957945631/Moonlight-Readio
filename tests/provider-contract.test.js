@@ -1609,7 +1609,7 @@ test("radio service aside mode appends persona reply without changing queue", as
   assert.equal(searchCalls, 0);
 });
 
-test("radio service opening mode returns one persona reply without touching playback or queue", async () => {
+test("radio service opening mode uses configured persona line without touching ai, playback, or queue", async () => {
   const queue = [
     { id: "ncm:old-1", title: "Old Song 1", artist: "Old Artist" },
   ];
@@ -1617,25 +1617,15 @@ test("radio service opening mode returns one persona reply without touching play
     id: "opening-dj",
     name: "Opening DJ",
     description: "Direct opening host",
+    openingLine: "我是 Opening DJ，今天由我来为你推荐音乐。先把频道打开，声音放稳一点。",
   }]]);
-  let receivedInput;
   let playbackCalls = 0;
   let searchCalls = 0;
   const radio = createRadioService({
     aiProvider: {
       name: "mock",
-      async plan(input) {
-        receivedInput = input;
-        return {
-          provider: "mock",
-          status: "ready",
-          reply: "Opening DJ: one generated hello.",
-          djText: "Opening DJ: one generated hello.",
-          mood: "Private radio",
-          djDirection: "Open only",
-          searchQueries: ["should not search"],
-          queueChanged: true,
-        };
+      async plan() {
+        throw new Error("opening should not call ai");
       },
     },
     musicProvider: {
@@ -1661,29 +1651,23 @@ test("radio service opening mode returns one persona reply without touching play
     currentTrack: queue[0],
   });
 
-  assert.equal(receivedInput.persona.id, "opening-dj");
-  assert.equal(receivedInput.context.responseMode, "opening");
+  assert.equal(result.ai.status, "static");
   assert.equal(result.queueChanged, false);
   assert.equal(result.currentTrack.id, "ncm:old-1");
   assert.deepEqual(result.queue.map((track) => track.id), ["ncm:old-1"]);
-  assert.deepEqual(result.conversation, [{ role: "dj", text: "Opening DJ: one generated hello." }]);
-  assert.equal(result.dj.text, "Opening DJ: one generated hello.");
+  assert.deepEqual(result.conversation, [{ role: "dj", text: "我是 Opening DJ，今天由我来为你推荐音乐。先把频道打开，声音放稳一点。" }]);
+  assert.equal(result.dj.text, "我是 Opening DJ，今天由我来为你推荐音乐。先把频道打开，声音放稳一点。");
   assert.equal(result.searchQueries.length, 0);
   assert.equal(playbackCalls, 0);
   assert.equal(searchCalls, 0);
 });
 
-test("radio service opening mode stays empty when ai falls back", async () => {
+test("radio service opening mode uses generic static line when persona has no opening line", async () => {
   const radio = createRadioService({
     aiProvider: {
       name: "mock",
       async plan() {
-        return {
-          provider: "mock",
-          status: "fallback",
-          reply: "Local fallback copy should not be shown.",
-          djText: "Local fallback copy should not be shown.",
-        };
+        throw new Error("opening should not call ai");
       },
     },
     musicProvider: {
@@ -1701,8 +1685,43 @@ test("radio service opening mode stays empty when ai falls back", async () => {
   const result = await radio.chat({ responseMode: "opening", conversation: [] });
 
   assert.equal(result.queueChanged, false);
-  assert.deepEqual(result.conversation, []);
-  assert.equal(result.dj.text, "");
+  assert.equal(result.conversation.length, 1);
+  assert.equal(result.dj.text, "我是月亮 DJ，今天由我来为你推荐音乐。先把频道打开，声音放稳一点，这段我陪你慢慢听。");
+});
+
+test("radio service opening mode supports luoyonghao through persona configuration", async () => {
+  const radio = createRadioService({
+    aiProvider: {
+      name: "mock",
+      async plan() {
+        throw new Error("opening should not call ai");
+      },
+    },
+    musicProvider: {
+      name: "netease",
+      authorized: true,
+      async searchTracks() {
+        throw new Error("should not search");
+      },
+      async getPlaybackSource() {
+        throw new Error("should not resolve playback");
+      },
+    },
+    personaRegistry: new Map([["luoyonghao", {
+      id: "luoyonghao",
+      name: "罗永浩",
+      openingLine: "我是罗永浩，今天由我来为你推荐音乐。先说结论，歌不能瞎放，得认真、有表达、不油腻。咱们把声音放稳，慢慢听。",
+    }]]),
+  });
+
+  const result = await radio.chat({ responseMode: "opening", personaId: "luoyonghao", conversation: [] });
+
+  assert.equal(result.queueChanged, false);
+  assert.doesNotMatch(result.dj.text, /Generate one short|queue|收到/);
+  assert.match(result.dj.text, /我是罗永浩/);
+  assert.match(result.dj.text, /先说结论/);
+  assert.match(result.dj.text, /今天由我来为你推荐音乐/);
+  assert.match(result.dj.text, /认真、有表达、不油腻/);
 });
 
 test("radio service can collect fifteen playable tracks", async () => {
